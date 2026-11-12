@@ -93,6 +93,7 @@ export async function assertActiveStaffUser(db: Db, actor: Pick<Actor, "firmId">
     .from(users)
     .where(and(eq(users.id, userId), inFirm(users.firmId, actor)))
     .limit(1);
-  if (!user || !user.isActive || user.role === "client") throw invalid;
+  // Read-only users and clients can't own or be assigned work.
+  if (!user || !user.isActive || user.role === "client" || user.role === "read_only") throw invalid;
   return { role: user.role };
 }

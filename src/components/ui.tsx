@@ -107,9 +107,9 @@ export function Panel({
 }
 
 /** Back-compat alias used by forms and simple sections. */
-export function Card({ children, className, title, actions }: { children: ReactNode; className?: string; title?: string; actions?: ReactNode }) {
+export function Card({ children, className, title, description, actions, flush }: { children: ReactNode; className?: string; title?: string; description?: ReactNode; actions?: ReactNode; flush?: boolean }) {
   return (
-    <Panel title={title} actions={actions} className={className}>
+    <Panel title={title} description={description} actions={actions} className={className} flush={flush}>
       {children}
     </Panel>
   );

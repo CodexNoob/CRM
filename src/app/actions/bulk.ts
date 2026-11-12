@@ -2,12 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db";
-import type { EngagementStatus } from "@/db/schema";
+import type { EngagementStatus, TaskStatus } from "@/db/schema";
 import type { ActionState } from "@/lib/action-state";
 import { requireStaffActor } from "@/lib/auth/current";
 import { AppError } from "@/lib/errors";
 import { archiveDocument, setDocumentShared } from "@/services/documents";
-import { setEngagementStatus, setTaskStatus } from "@/services/engagements";
+import { setEngagementStatus } from "@/services/engagements";
+import { setTaskStatus } from "@/services/tasks";
 import { setLeadStatus } from "@/services/leads";
 
 /**
@@ -36,14 +37,16 @@ async function each(ids: unknown, fn: (id: string) => Promise<void>, noun: strin
   return { status: "success", message: `${ok} ${noun} updated.` };
 }
 
-export async function bulkTaskStatusAction(ids: string[], status: "open" | "done") {
+/** Moves tasks to a status ("open"/"done" accepted for older callers). Blocked or ineligible tasks are skipped and reported. */
+export async function bulkTaskStatusAction(ids: string[], status: TaskStatus | "open" | "done") {
   const actor = await requireStaffActor();
-  return each(ids, (id) => setTaskStatus(getDb(), actor, id, status === "done" ? "done" : "open").then(() => undefined), ids.length === 1 ? "task" : "tasks");
+  return each(ids, (id) => setTaskStatus(getDb(), actor, id, status).then(() => undefined), ids.length === 1 ? "task" : "tasks");
 }
 
-export async function bulkLeadStatusAction(ids: string[], status: "contacted" | "qualified" | "lost") {
+/** Moves leads to a stage. "lost" needs a reason (applied to every lead); converted leads are skipped by the service. */
+export async function bulkLeadStatusAction(ids: string[], status: string, lostReason?: string) {
   const actor = await requireStaffActor();
-  return each(ids, (id) => setLeadStatus(getDb(), actor, id, status), ids.length === 1 ? "lead" : "leads");
+  return each(ids, (id) => setLeadStatus(getDb(), actor, id, { status, lostReason }), ids.length === 1 ? "lead" : "leads");
 }
 
 export async function bulkEngagementStatusAction(ids: string[], status: EngagementStatus) {

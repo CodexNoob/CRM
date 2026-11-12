@@ -2,8 +2,9 @@ import { ASSIGNABLE_ROLES } from "@/lib/auth/actor";
 import { TASK_OPEN, ENGAGEMENT_DONE } from "@/lib/status";
 import { and, asc, desc, eq, inArray, isNotNull, lt, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { Db } from "@/db";
-import { auditEvents, clientAssignments, clients, documents, engagements, tasks, users, type EngagementStatus, type ClientStatus } from "@/db/schema";
-import type { Actor } from "@/lib/auth/actor";
+import { activities, auditEvents, clientAssignments, clients, documents, engagements, tasks, users, type EngagementStatus, type ClientStatus } from "@/db/schema";
+import { alias } from "drizzle-orm/pg-core";
+import { seesAllClients, type Actor } from "@/lib/auth/actor";
 import { assertClientAccess, inFirm, requireStaff, visibleClientsCondition } from "./access";
 import { firmToday } from "./dashboard";
 
@@ -249,4 +250,76 @@ export async function getLatestTaxEngagement(db: Db, actor: Actor, clientId: str
     .orderBy(sql`${engagements.taxYear} desc nulls last`, desc(engagements.createdAt))
     .limit(1);
   return row ?? null;
+}
+
+/* ───────── Workspace activity feed (business timeline, not the security log) ───────── */
+
+export interface WorkspaceActivity {
+  id: string;
+  entityType: "lead" | "client" | "engagement" | "task";
+  entityId: string;
+  type: string;
+  body: string | null;
+  metadata: Record<string, unknown> | null;
+  occurredAt: Date;
+  actorName: string | null;
+  /** Name/title of the record the event is about (lead name, client, engagement or task title). */
+  entityName: string | null;
+  /** For assignments: the person assigned. */
+  assigneeName: string | null;
+}
+
+/**
+ * Recent workflow events the actor may see: lead created/converted, client created, engagement
+ * created / status changed / ready for review, task assigned / completed. Client-linked events are
+ * limited to visible clients; lead events are firm-wide (leads hold no taxpayer data); events with
+ * neither are shown only to their actor (or to staff who see all clients).
+ */
+export async function listWorkspaceActivity(db: Db, actor: Actor, limit = 15): Promise<WorkspaceActivity[]> {
+  requireStaff(actor);
+  const visible = visibleClientsCondition(db, actor);
+  const assigneeUser = alias(users, "assignee_user");
+  const rows = await db
+    .select({
+      id: activities.id,
+      entityType: activities.entityType,
+      entityId: activities.entityId,
+      type: activities.type,
+      body: activities.body,
+      metadata: activities.metadata,
+      occurredAt: activities.occurredAt,
+      actorName: users.name,
+      assigneeName: assigneeUser.name,
+      entityName: sql<string | null>`case ${activities.entityType}
+        when 'lead' then (select l.name from leads l where l.id = ${activities.entityId} and l.firm_id = ${activities.firmId})
+        when 'client' then (select c.display_name from clients c where c.id = ${activities.entityId} and c.firm_id = ${activities.firmId})
+        when 'engagement' then (select e.title from engagements e where e.id = ${activities.entityId} and e.firm_id = ${activities.firmId})
+        when 'task' then (select t.title from tasks t where t.id = ${activities.entityId} and t.firm_id = ${activities.firmId})
+      end`,
+    })
+    .from(activities)
+    .leftJoin(users, eq(users.id, activities.actorId))
+    .leftJoin(assigneeUser, sql`${activities.type} = 'assignment' and ${assigneeUser.id}::text = ${activities.metadata} ->> 'userId'`)
+    .where(
+      and(
+        inFirm(activities.firmId, actor),
+        or(
+          sql`${activities.clientId} is not null and exists (select 1 from ${clients} where ${clients.id} = ${activities.clientId} and ${visible})`,
+          and(sql`${activities.clientId} is null`, eq(activities.entityType, "lead")),
+          and(sql`${activities.clientId} is null`, sql`${activities.entityType} <> 'lead'`, seesAllClients(actor) ? undefined : eq(activities.actorId, actor.userId)),
+        ),
+        sql`(
+          (${activities.entityType} = 'lead' and ${activities.type} = 'system' and ${activities.body} in ('Lead created', 'Inquiry received from the website'))
+          or (${activities.entityType} = 'lead' and ${activities.type} = 'status_change' and ${activities.metadata} ->> 'to' = 'converted')
+          or (${activities.entityType} = 'client' and ${activities.type} = 'system' and ${activities.body} like 'Client created%')
+          or (${activities.entityType} = 'engagement' and ${activities.type} = 'system' and (${activities.body} like 'Engagement created%' or ${activities.metadata} ->> 'kind' = 'ready_for_review'))
+          or (${activities.entityType} = 'engagement' and ${activities.type} = 'status_change' and ${activities.metadata} ->> 'from' is not null)
+          or (${activities.entityType} = 'task' and ${activities.type} = 'assignment')
+          or (${activities.entityType} = 'task' and ${activities.type} = 'status_change' and ${activities.metadata} ->> 'to' = 'completed')
+        )`,
+      ),
+    )
+    .orderBy(desc(activities.occurredAt), desc(activities.createdAt))
+    .limit(limit);
+  return rows as WorkspaceActivity[];
 }

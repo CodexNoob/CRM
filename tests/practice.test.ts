@@ -48,7 +48,7 @@ describe("tax & accounting views", () => {
 
   it("builds practice reports from live data", async () => {
     const lead = await createLead(h.db, admin, { name: "Prospect", source: "referral" });
-    await convertLead(h.db, admin, lead.id);
+    await convertLead(h.db, admin, lead.id, { mode: "new", type: "individual", displayName: "Prospect" });
     const r = await getPracticeReport(h.db, admin);
     expect(r.byService.find((s) => s.serviceType === "business_tax")).toMatchObject({ open: 0, done: 1 });
     expect(r.leads.find((l) => l.status === "converted")?.count).toBe(1);

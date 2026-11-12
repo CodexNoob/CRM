@@ -1,4 +1,17 @@
-import type { ClientStatus, ClientType, EngagementStatus, LeadStatus, ServiceType, UserRole } from "@/db/schema";
+import type {
+  ClientStatus,
+  ClientType,
+  EngagementStatus,
+  LeadStatus,
+  ServiceType,
+  TaxAuthorizationStatus,
+  TaxChecklistStatus,
+  TaxFilingStatus,
+  TaxPreparationStatus,
+  TaxReturnStatus,
+  TaxReviewStatus,
+  UserRole,
+} from "@/db/schema";
 
 export const SERVICE_LABELS: Record<ServiceType, string> = {
   individual_tax: "Individual tax return",
@@ -156,6 +169,65 @@ export const APPOINTMENT_KIND_LABELS: Record<"in_person" | "phone" | "video" | "
   phone: "Phone call",
   video: "Video call",
   internal: "Internal",
+};
+
+export const TAX_PREPARATION_STATUS_LABELS: Record<TaxPreparationStatus, string> = {
+  not_started: "Not started",
+  documents_requested: "Documents requested",
+  awaiting_documents: "Awaiting documents",
+  documents_received: "Documents received",
+  verification: "Verification",
+  ready_for_preparation: "Ready for preparation",
+  in_preparation: "In preparation",
+  internal_review: "Internal review",
+  changes_required: "Changes required",
+  completed: "Completed",
+};
+
+export const TAX_CHECKLIST_STATUS_LABELS: Record<TaxChecklistStatus, string> = {
+  not_requested: "Not requested",
+  requested: "Requested",
+  received: "Received",
+  under_review: "Under review",
+  verified: "Verified",
+  rejected: "Rejected",
+  not_applicable: "Not applicable",
+};
+
+export const TAX_RETURN_STATUS_LABELS: Record<TaxReturnStatus, string> = {
+  not_started: "Not started",
+  waiting_for_documents: "Waiting for documents",
+  in_preparation: "In preparation",
+  ready_for_review: "Ready for review",
+  under_review: "Under review",
+  changes_required: "Changes required",
+  awaiting_client_approval: "Awaiting client approval",
+  approved: "Approved",
+  filed: "Filed",
+  accepted: "Accepted",
+  rejected: "Rejected",
+  amended: "Amended",
+};
+
+export const TAX_REVIEW_STATUS_LABELS: Record<TaxReviewStatus, string> = {
+  not_started: "Not started",
+  pending: "Pending",
+  changes_required: "Changes required",
+  approved: "Approved",
+};
+
+export const TAX_AUTHORIZATION_STATUS_LABELS: Record<TaxAuthorizationStatus, string> = {
+  not_requested: "Not requested",
+  requested: "Requested",
+  authorized: "Authorized",
+  declined: "Declined",
+};
+
+export const TAX_FILING_STATUS_LABELS: Record<TaxFilingStatus, string> = {
+  not_filed: "Not filed",
+  filed: "Filed",
+  accepted: "Accepted",
+  rejected: "Rejected",
 };
 
 export function formatBytes(n: number): string {

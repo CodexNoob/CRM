@@ -91,8 +91,8 @@ describe("single-field updates used by bulk actions", () => {
     await expect(setEngagementStatus(h.db, admin, engA, "bogus" as never)).rejects.toBeInstanceOf(ValidationError);
     const lead = await createLead(h.db, admin, { name: "Lee" });
     await setLeadStatus(h.db, prepA, lead.id, "contacted");
-    await convertLead(h.db, admin, lead.id);
-    await expect(setLeadStatus(h.db, admin, lead.id, "lost")).rejects.toBeInstanceOf(ValidationError);
+    await convertLead(h.db, admin, lead.id, { mode: "new", type: "individual", displayName: "Lee" });
+    await expect(setLeadStatus(h.db, admin, lead.id, { status: "lost", lostReason: "x" })).rejects.toBeInstanceOf(ValidationError);
     await expect(setLeadStatus(h.db, portal, lead.id, "lost")).rejects.toBeInstanceOf(ForbiddenError);
   });
 });

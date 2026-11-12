@@ -60,7 +60,9 @@ describe("practice-workflow migration (0016) on existing data", () => {
   });
 
   it("maps task statuses and links tasks to their engagement's client", async () => {
-    const tasks = await q<{ title: string; status: string; client_id: string; task_number: number }>("select title, status::text, client_id, task_number from tasks order by task_number");
+    // Both rows share a created_at, so numbering order between them is arbitrary: compare by title.
+    const tasks = await q<{ title: string; status: string; client_id: string; task_number: number }>("select title, status::text, client_id, task_number from tasks order by title");
+    expect(tasks.map((t) => t.task_number).sort()).toEqual([1, 2]);
     expect(tasks.map((t) => [t.title, t.status])).toEqual([
       ["Collect W-2", "todo"],
       ["Done already", "completed"],

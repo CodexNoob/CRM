@@ -1,14 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { getDb } from "@/db";
 import { errorState, formValues, type ActionState } from "@/lib/action-state";
 import { requireClientActor, requireStaffActor } from "@/lib/auth/current";
 import { ValidationError } from "@/lib/errors";
 import { cancelAppointment, createAppointment } from "@/services/calendar";
 import { archiveDocument, setDocumentShared, uploadDocument } from "@/services/documents";
-import { convertLead, createLead, updateLead } from "@/services/leads";
 import { sendMessage } from "@/services/messages";
 
 /* Every action re-authenticates; the services re-authorize every record. */
@@ -19,40 +17,7 @@ async function fileFromForm(formData: FormData): Promise<{ fileName: string; dat
   return { fileName: file.name, data: Buffer.from(await file.arrayBuffer()) };
 }
 
-/* ───────── Leads ───────── */
-
-export async function createLeadAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const actor = await requireStaffActor();
-  let id: string;
-  try {
-    id = (await createLead(getDb(), actor, formValues(formData))).id;
-  } catch (error) {
-    return errorState(error, formData);
-  }
-  redirect(`/staff/leads/${id}`);
-}
-
-export async function updateLeadAction(id: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
-  const actor = await requireStaffActor();
-  try {
-    await updateLead(getDb(), actor, id, formValues(formData));
-  } catch (error) {
-    return errorState(error, formData);
-  }
-  revalidatePath("/staff/leads", "layout");
-  return { status: "success", message: "Lead saved." };
-}
-
-export async function convertLeadAction(id: string, _prev: ActionState, _formData: FormData): Promise<ActionState> {
-  const actor = await requireStaffActor();
-  let clientId: string;
-  try {
-    clientId = (await convertLead(getDb(), actor, id)).clientId;
-  } catch (error) {
-    return errorState(error);
-  }
-  redirect(`/staff/clients/${clientId}`);
-}
+/* Lead and client actions live in ./crm.ts. */
 
 /* ───────── Documents ───────── */
 

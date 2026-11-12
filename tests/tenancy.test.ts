@@ -92,8 +92,8 @@ describe("firm B cannot change firm A", () => {
     await expect(setTaskStatus(h.db, adminB, A.task, "done")).rejects.toBeInstanceOf(NotFoundError);
     await expect(createEngagement(h.db, adminB, A.client, { title: "x", serviceType: "other", ownerId: adminB.userId })).rejects.toBeInstanceOf(NotFoundError);
     await expect(updateLead(h.db, adminB, A.lead, { name: "x" })).rejects.toBeInstanceOf(NotFoundError);
-    await expect(setLeadStatus(h.db, adminB, A.lead, "lost")).rejects.toBeInstanceOf(NotFoundError);
-    await expect(convertLead(h.db, adminB, A.lead)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(setLeadStatus(h.db, adminB, A.lead, { status: "lost", lostReason: "x" })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(convertLead(h.db, adminB, A.lead, { mode: "new", type: "individual", displayName: "x", confirmNotDuplicate: "on" })).rejects.toBeInstanceOf(NotFoundError);
     await expect(setDocumentShared(h.db, adminB, A.document, false)).rejects.toBeInstanceOf(NotFoundError);
     await expect(archiveDocument(h.db, adminB, A.document)).rejects.toBeInstanceOf(NotFoundError);
     await expect(uploadDocument(h.db, adminB, { clientId: A.client, fileName: "x.pdf", data: PDF })).rejects.toBeInstanceOf(NotFoundError);

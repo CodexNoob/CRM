@@ -1,71 +1,75 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getDb } from "@/db";
-import type { EngagementStatus } from "@/db/schema";
-import { PageHeader } from "@/components/ui";
+import { Card, PageHeader, StatStrip, buttonClass } from "@/components/ui";
 import { requireStaffActor } from "@/lib/auth/current";
-import { formatDate, SERVICE_LABELS, STATUS_LABELS } from "@/lib/labels";
+import { TAX_PREPARATION_STATUS_LABELS } from "@/lib/labels";
 import { firmToday } from "@/services/dashboard";
+import { listClients } from "@/services/clients";
+import { listStaff } from "@/services/engagements";
 import { listWork, TAX_SERVICES } from "@/services/practice";
+import { listTaxDocumentTemplates, listTaxPreparationCases } from "@/services/tax";
+import { can } from "@/lib/auth/permissions";
+import { TaxPreparationCasesTable } from "./cases-table";
+import { CreateTaxDocumentTemplateForm, CreateTaxPreparationForm } from "./tax-forms";
 
 export const metadata: Metadata = { title: "Tax Preparation" };
 
-/** The preparation pipeline. Move a return between stages by changing its status on the engagement page. */
-const STAGES: { status: EngagementStatus; hint: string }[] = [
-  { status: "not_started", hint: "Engagement signed, not begun" },
-  { status: "waiting_on_client", hint: "Blocked on client items" },
-  { status: "in_progress", hint: "Being prepared" },
-  { status: "in_review", hint: "Reviewer sign-off" },
-  { status: "ready_to_file", hint: "Client approval / e-file" },
-  { status: "filed", hint: "Filed" },
-];
-
 export default async function TaxPreparationPage() {
   const actor = await requireStaffActor();
-  const items = await listWork(getDb(), actor, { services: TAX_SERVICES });
+  const db = getDb();
+  const [cases, clients, staff, engagements, templates] = await Promise.all([
+    listTaxPreparationCases(db, actor),
+    listClients(db, actor),
+    listStaff(db, actor),
+    listWork(db, actor, { services: TAX_SERVICES }),
+    listTaxDocumentTemplates(db, actor),
+  ]);
   const today = firmToday();
+  const open = cases.filter((c) => c.status !== "completed");
+  const overdue = open.filter((c) => c.dueDate && c.dueDate < today);
+  const mine = cases.filter((c) => c.preparerName === actor.name || c.reviewerName === actor.name);
+  const staffOptions = staff.filter((s) => s.role !== "read_only").map((s) => ({ id: s.id, name: s.name }));
 
   return (
     <>
-      <PageHeader title="Tax Preparation" description="Every tax return by preparation stage. Open a return to move it to the next stage." />
-      <div className="-mx-4 overflow-x-auto px-4 pb-2 lg:-mx-6 lg:px-6">
-        <div className="grid min-w-[72rem] grid-cols-6 gap-3">
-          {STAGES.map((stage) => {
-            const col = items.filter((i) => i.status === stage.status);
-            return (
-              <section key={stage.status} className="flex flex-col rounded-lg border border-line bg-hover" aria-label={STATUS_LABELS[stage.status]}>
-                <header className="flex items-start justify-between gap-2 border-b border-line px-3 py-2.5">
-                  <div>
-                    <h2 className="text-[13px] font-semibold text-ink">{STATUS_LABELS[stage.status]}</h2>
-                    <p className="text-[11px] text-muted">{stage.hint}</p>
-                  </div>
-                  <span className="tabular rounded border border-line bg-surface px-1.5 text-[11.5px] font-medium leading-5 text-ink">{col.length}</span>
-                </header>
-                <ul className="flex-1 space-y-2 p-2">
-                  {col.length === 0 ? <li className="px-1 py-6 text-center text-xs text-muted">Empty</li> : null}
-                  {col.map((w) => {
-                    const late = !!w.dueDate && w.dueDate < today && stage.status !== "filed";
-                    return (
-                      <li key={w.id}>
-                        <Link href={`/staff/engagements/${w.id}`} className="block rounded-md border border-line bg-surface p-2.5 shadow-sm hover:border-line-strong">
-                          <p className="text-[13px] font-medium text-ink">{w.clientName}</p>
-                          <p className="text-[12px] text-muted">{w.title}</p>
-                          <p className="mt-2 flex items-center justify-between gap-2 text-[11px]">
-                            <span className="text-muted">{SERVICE_LABELS[w.serviceType].replace(" tax return", "")} · {w.ownerName.split(" ")[0]}</span>
-                            <span className={late ? "font-medium text-danger-ink" : "text-muted"}>{w.dueDate ? formatDate(w.dueDate) : ""}</span>
-                          </p>
-                          {w.openTasks ? <p className="mt-1 text-[11px] text-muted">{w.openTasks} open task{w.openTasks === 1 ? "" : "s"}</p> : null}
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-            );
-          })}
+      <PageHeader title="Tax Preparation" description="Production cases, document requirements, assignments, and review readiness." />
+      <StatStrip className="mb-5" items={[
+        { label: "Total cases", value: cases.length },
+        { label: "Waiting for documents", value: cases.filter((c) => ["documents_requested", "awaiting_documents"].includes(c.status)).length, tone: "warning" },
+        { label: "Ready for preparation", value: cases.filter((c) => c.status === "ready_for_preparation").length },
+        { label: "In preparation", value: cases.filter((c) => c.status === "in_preparation").length },
+        { label: "Under review", value: cases.filter((c) => c.status === "internal_review").length },
+        { label: "Overdue", value: overdue.length, tone: overdue.length ? "danger" : "default" },
+      ]} />
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <Card title="Preparation cases" description="Searchable cases use assigned-staff visibility and retain their own lifecycle separate from engagements." flush>
+          <TaxPreparationCasesTable cases={cases} today={today} />
+        </Card>
+        <div className="space-y-5">
+          <Card title="New preparation case">
+            <CreateTaxPreparationForm
+              clients={clients.map((c) => ({ id: c.id, name: c.displayName }))}
+              engagements={engagements.map((e) => ({ id: e.id, clientId: e.clientId, title: e.title, clientName: e.clientName, serviceType: e.serviceType }))}
+              staff={staffOptions}
+              defaultTaxYear={new Date().getFullYear() - 1}
+            />
+          </Card>
+          {can(actor, "tax_preparation", "manage") ? (
+            <Card title="Document requirements" description={`${templates.length} active requirements. New cases receive matching requirements.`}>
+              <details>
+                <summary className={buttonClass("secondary", "cursor-pointer list-none")}>Configure a requirement</summary>
+                <div className="mt-4"><CreateTaxDocumentTemplateForm /></div>
+              </details>
+            </Card>
+          ) : null}
+          <Card title="My assigned cases">
+            {mine.length ? <ul className="space-y-2 text-[13px]">{mine.slice(0, 6).map((c) => (
+              <li key={c.id}><Link href={`/staff/tax-preparation/${c.id}`} className="font-medium text-ink hover:underline">{c.clientName}</Link><span className="text-muted"> · {c.taxYear} · {TAX_PREPARATION_STATUS_LABELS[c.status]}</span></li>
+            ))}</ul> : <p className="text-[13px] text-muted">No cases assigned to you.</p>}
+          </Card>
         </div>
       </div>
-      <p className="mt-3 text-xs text-muted">On hold and completed returns are listed under Tax Returns.</p>
     </>
   );
 }

@@ -22,6 +22,7 @@ export async function createClientAction(_prev: ActionState, formData: FormData)
   } catch (error) {
     return errorState(error, formData);
   }
+  revalidatePath("/staff/clients");
   redirect(`/staff/clients/${id}`);
 }
 
@@ -32,6 +33,8 @@ export async function updateClientAction(clientId: string, _prev: ActionState, f
   } catch (error) {
     return errorState(error, formData);
   }
+  revalidatePath("/staff/clients");
+  revalidatePath(`/staff/clients/${clientId}`);
   redirect(`/staff/clients/${clientId}`);
 }
 

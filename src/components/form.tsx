@@ -75,7 +75,7 @@ function FieldShell({ name, label, hint, required, errors, errorId, children }: 
 }
 
 export function TextField(
-  props: FieldProps & { type?: string; autoComplete?: string; placeholder?: string; inputMode?: "text" | "email" | "tel" | "numeric" },
+  props: FieldProps & { type?: string; autoComplete?: string; placeholder?: string; inputMode?: "text" | "email" | "tel" | "numeric" | "decimal"; min?: number | string; step?: number | string },
 ) {
   const { errors, errorId } = useFieldMeta(props);
   const value = props.state.values?.[props.name] ?? props.defaultValue ?? "";
@@ -91,6 +91,8 @@ export function TextField(
         autoComplete={props.autoComplete}
         placeholder={props.placeholder}
         inputMode={props.inputMode}
+        min={props.min}
+        step={props.step}
         aria-invalid={errors ? true : undefined}
         aria-describedby={errorId}
         className={inputClass}

@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { getDb } from "@/db";
 import { navForRole } from "@/components/staff/nav-config";
 import { StaffShell } from "@/components/staff/shell";
+import { ToastProvider } from "@/components/toast";
 import { product } from "@/content/product";
 import { getCurrentFirmAccess, requireStaffActor } from "@/lib/auth/current";
 import { ROLE_LABELS } from "@/lib/labels";
@@ -54,6 +55,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   };
 
   return (
+    <ToastProvider>
     <StaffShell
       sections={sections}
       badges={{ myOpenTasks, newLeads: leadCounts?.new ?? 0, unreadMessages }}
@@ -69,5 +71,6 @@ export default async function StaffLayout({ children }: { children: React.ReactN
         <SubscriptionModal summary={summary} />
       </Suspense>
     </StaffShell>
+    </ToastProvider>
   );
 }

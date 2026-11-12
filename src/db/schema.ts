@@ -67,6 +67,46 @@ export const engagementStatus = pgEnum("engagement_status", [
 export const proposalStatus = pgEnum("proposal_status", ["not_required", "draft", "sent", "accepted", "declined"]);
 export const billingFrequency = pgEnum("billing_frequency", ["one_time", "monthly", "quarterly", "annually", "hourly"]);
 export const taskStatus = pgEnum("task_status", ["todo", "in_progress", "waiting_client", "waiting_review", "blocked", "completed", "cancelled"]);
+export const taxPreparationStatus = pgEnum("tax_preparation_status", [
+  "not_started",
+  "documents_requested",
+  "awaiting_documents",
+  "documents_received",
+  "verification",
+  "ready_for_preparation",
+  "in_preparation",
+  "internal_review",
+  "changes_required",
+  "completed",
+]);
+export const taxChecklistStatus = pgEnum("tax_checklist_status", [
+  "not_requested",
+  "requested",
+  "received",
+  "under_review",
+  "verified",
+  "rejected",
+  "not_applicable",
+]);
+export const taxReturnStatus = pgEnum("tax_return_status", [
+  "not_started",
+  "waiting_for_documents",
+  "in_preparation",
+  "ready_for_review",
+  "under_review",
+  "changes_required",
+  "awaiting_client_approval",
+  "approved",
+  "filed",
+  "accepted",
+  "rejected",
+  "amended",
+]);
+export const taxFilingType = pgEnum("tax_filing_type", ["original", "amended"]);
+export const taxReviewStatus = pgEnum("tax_review_status", ["not_started", "pending", "changes_required", "approved"]);
+export const taxAuthorizationStatus = pgEnum("tax_authorization_status", ["not_requested", "requested", "authorized", "declined"]);
+export const taxFilingStatus = pgEnum("tax_filing_status", ["not_filed", "filed", "accepted", "rejected"]);
+export const taxAuthorityStatus = pgEnum("tax_authority_status", ["pending", "accepted", "rejected"]);
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -432,6 +472,7 @@ export const documents = pgTable(
     index("documents_client_idx").on(t.clientId),
     index("documents_engagement_idx").on(t.engagementId),
     index("documents_firm_idx").on(t.firmId),
+    unique("documents_firm_id_id_unique").on(t.firmId, t.id),
     foreignKey({ name: "documents_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
     foreignKey({ name: "documents_firm_engagement_fk", columns: [t.firmId, t.engagementId], foreignColumns: [engagements.firmId, engagements.id] }),
     foreignKey({ name: "documents_firm_task_fk", columns: [t.firmId, t.taskId], foreignColumns: [tasks.firmId, tasks.id] }),
@@ -873,6 +914,180 @@ export const statusHistory = pgTable(
   (t) => [index("status_history_entity_idx").on(t.entityType, t.entityId, t.createdAt)],
 ).enableRLS();
 
+/* ───────────────────────── Tax preparation and returns ───────────────────────── */
+
+/** Reusable, firm-configured requirements. A null taxpayer type/jurisdiction/year is a wildcard. */
+export const taxDocumentTemplates = pgTable(
+  "tax_document_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
+    name: text("name").notNull(),
+    description: text("description"),
+    taxpayerType: clientType("taxpayer_type"),
+    serviceType: serviceType("service_type").notNull(),
+    jurisdiction: text("jurisdiction"),
+    taxYear: integer("tax_year"),
+    required: boolean("required").notNull().default(true),
+    isActive: boolean("is_active").notNull().default(true),
+    createdById: uuid("created_by_id"),
+    ...timestamps,
+  },
+  (t) => [
+    index("tax_document_templates_scope_idx").on(t.firmId, t.serviceType, t.taxYear),
+    unique("tax_document_templates_firm_id_id_unique").on(t.firmId, t.id),
+    foreignKey({ name: "tax_document_templates_firm_creator_fk", columns: [t.firmId, t.createdById], foreignColumns: [users.firmId, users.id] }),
+  ],
+).enableRLS();
+
+/** One production case per tax filing scope. Requirements are snapshotted onto checklist items. */
+export const taxPreparationCases = pgTable(
+  "tax_preparation_cases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
+    clientId: uuid("client_id").notNull(),
+    engagementId: uuid("engagement_id"),
+    taxYear: integer("tax_year").notNull(),
+    taxPeriod: text("tax_period").notNull().default("annual"),
+    jurisdiction: text("jurisdiction").notNull(),
+    taxFormType: text("tax_form_type").notNull(),
+    filingType: taxFilingType("filing_type").notNull().default("original"),
+    returnSequence: integer("return_sequence").notNull().default(1),
+    serviceType: serviceType("service_type").notNull(),
+    preparerId: uuid("preparer_id"),
+    reviewerId: uuid("reviewer_id"),
+    status: taxPreparationStatus("status").notNull().default("not_started"),
+    preparationStartedAt: timestamp("preparation_started_at", { withTimezone: true }),
+    dueDate: date("due_date", { mode: "string" }),
+    submittedForReviewAt: timestamp("submitted_for_review_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    internalNotes: text("internal_notes"),
+    createdById: uuid("created_by_id"),
+    ...timestamps,
+  },
+  (t) => [
+    unique("tax_preparation_cases_firm_id_id_unique").on(t.firmId, t.id),
+    uniqueIndex("tax_preparation_cases_scope_unique").on(
+      t.firmId, t.clientId, t.taxYear, t.taxPeriod, t.jurisdiction, t.taxFormType, t.filingType, t.returnSequence,
+    ),
+    index("tax_preparation_cases_status_due_idx").on(t.firmId, t.status, t.dueDate),
+    index("tax_preparation_cases_preparer_idx").on(t.firmId, t.preparerId, t.status),
+    index("tax_preparation_cases_reviewer_idx").on(t.firmId, t.reviewerId, t.status),
+    foreignKey({ name: "tax_preparation_cases_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+    foreignKey({ name: "tax_preparation_cases_firm_engagement_fk", columns: [t.firmId, t.engagementId], foreignColumns: [engagements.firmId, engagements.id] }),
+    foreignKey({ name: "tax_preparation_cases_firm_preparer_fk", columns: [t.firmId, t.preparerId], foreignColumns: [users.firmId, users.id] }),
+    foreignKey({ name: "tax_preparation_cases_firm_reviewer_fk", columns: [t.firmId, t.reviewerId], foreignColumns: [users.firmId, users.id] }),
+    foreignKey({ name: "tax_preparation_cases_firm_creator_fk", columns: [t.firmId, t.createdById], foreignColumns: [users.firmId, users.id] }),
+  ],
+).enableRLS();
+
+export const taxPreparationChecklistItems = pgTable(
+  "tax_preparation_checklist_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
+    preparationCaseId: uuid("preparation_case_id").notNull(),
+    templateId: uuid("template_id"),
+    name: text("name").notNull(),
+    description: text("description"),
+    required: boolean("required").notNull().default(true),
+    status: taxChecklistStatus("status").notNull().default("not_requested"),
+    requestedAt: timestamp("requested_at", { withTimezone: true }),
+    receivedAt: timestamp("received_at", { withTimezone: true }),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    verifiedById: uuid("verified_by_id"),
+    documentId: uuid("document_id"),
+    notes: text("notes"),
+    ...timestamps,
+  },
+  (t) => [
+    index("tax_preparation_checklist_case_idx").on(t.firmId, t.preparationCaseId),
+    foreignKey({ name: "tax_preparation_checklist_firm_case_fk", columns: [t.firmId, t.preparationCaseId], foreignColumns: [taxPreparationCases.firmId, taxPreparationCases.id] }),
+    foreignKey({ name: "tax_preparation_checklist_firm_template_fk", columns: [t.firmId, t.templateId], foreignColumns: [taxDocumentTemplates.firmId, taxDocumentTemplates.id] }),
+    foreignKey({ name: "tax_preparation_checklist_firm_verifier_fk", columns: [t.firmId, t.verifiedById], foreignColumns: [users.firmId, users.id] }),
+    foreignKey({ name: "tax_preparation_checklist_firm_document_fk", columns: [t.firmId, t.documentId], foreignColumns: [documents.firmId, documents.id] }),
+  ],
+).enableRLS();
+
+/** Current return record. Detailed tax values and identifiers are intentionally not stored. */
+export const taxReturns = pgTable(
+  "tax_returns",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
+    returnNumber: text("return_number").notNull(),
+    clientId: uuid("client_id").notNull(),
+    engagementId: uuid("engagement_id"),
+    preparationCaseId: uuid("preparation_case_id"),
+    taxpayerType: clientType("taxpayer_type").notNull(),
+    taxYear: integer("tax_year").notNull(),
+    taxPeriod: text("tax_period").notNull().default("annual"),
+    taxFormType: text("tax_form_type").notNull(),
+    jurisdiction: text("jurisdiction").notNull(),
+    filingType: taxFilingType("filing_type").notNull().default("original"),
+    returnSequence: integer("return_sequence").notNull().default(1),
+    preparerId: uuid("preparer_id"),
+    reviewerId: uuid("reviewer_id"),
+    filingDeadline: date("filing_deadline", { mode: "string" }),
+    status: taxReturnStatus("status").notNull().default("not_started"),
+    reviewStatus: taxReviewStatus("review_status").notNull().default("not_started"),
+    authorizationStatus: taxAuthorizationStatus("authorization_status").notNull().default("not_requested"),
+    filingStatus: taxFilingStatus("filing_status").notNull().default("not_filed"),
+    authorityStatus: taxAuthorityStatus("authority_status"),
+    clientAuthorizedAt: timestamp("client_authorized_at", { withTimezone: true }),
+    filingDate: date("filing_date", { mode: "string" }),
+    submissionReference: text("submission_reference"),
+    taxAuthorityResponse: text("tax_authority_response"),
+    refundAmountCents: integer("refund_amount_cents"),
+    amountOwedCents: integer("amount_owed_cents"),
+    internalNotes: text("internal_notes"),
+    createdById: uuid("created_by_id"),
+    ...timestamps,
+  },
+  (t) => [
+    unique("tax_returns_firm_id_id_unique").on(t.firmId, t.id),
+    uniqueIndex("tax_returns_number_unique").on(t.firmId, t.returnNumber),
+    uniqueIndex("tax_returns_case_unique").on(t.firmId, t.preparationCaseId),
+    uniqueIndex("tax_returns_scope_unique").on(
+      t.firmId, t.clientId, t.taxYear, t.taxPeriod, t.jurisdiction, t.taxFormType, t.filingType, t.returnSequence,
+    ),
+    index("tax_returns_status_deadline_idx").on(t.firmId, t.status, t.filingDeadline),
+    index("tax_returns_preparer_idx").on(t.firmId, t.preparerId, t.status),
+    index("tax_returns_reviewer_idx").on(t.firmId, t.reviewerId, t.status),
+    foreignKey({ name: "tax_returns_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+    foreignKey({ name: "tax_returns_firm_engagement_fk", columns: [t.firmId, t.engagementId], foreignColumns: [engagements.firmId, engagements.id] }),
+    foreignKey({ name: "tax_returns_firm_case_fk", columns: [t.firmId, t.preparationCaseId], foreignColumns: [taxPreparationCases.firmId, taxPreparationCases.id] }),
+    foreignKey({ name: "tax_returns_firm_preparer_fk", columns: [t.firmId, t.preparerId], foreignColumns: [users.firmId, users.id] }),
+    foreignKey({ name: "tax_returns_firm_reviewer_fk", columns: [t.firmId, t.reviewerId], foreignColumns: [users.firmId, users.id] }),
+    foreignKey({ name: "tax_returns_firm_creator_fk", columns: [t.firmId, t.createdById], foreignColumns: [users.firmId, users.id] }),
+  ],
+).enableRLS();
+
+/** Append-only return lifecycle history; filing details are kept separate from audit metadata. */
+export const taxReturnHistory = pgTable(
+  "tax_return_history",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
+    taxReturnId: uuid("tax_return_id").notNull(),
+    actorId: uuid("actor_id"),
+    eventType: text("event_type").notNull(),
+    previousStatus: text("previous_status"),
+    nextStatus: text("next_status"),
+    filingDate: date("filing_date", { mode: "string" }),
+    submissionReference: text("submission_reference"),
+    authorityStatus: taxAuthorityStatus("authority_status"),
+    authorityResponse: text("authority_response"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("tax_return_history_return_idx").on(t.firmId, t.taxReturnId, t.createdAt),
+    foreignKey({ name: "tax_return_history_firm_return_fk", columns: [t.firmId, t.taxReturnId], foreignColumns: [taxReturns.firmId, taxReturns.id] }),
+    foreignKey({ name: "tax_return_history_firm_actor_fk", columns: [t.firmId, t.actorId], foreignColumns: [users.firmId, users.id] }),
+  ],
+).enableRLS();
+
 export type User = typeof users.$inferSelect;
 export type Firm = typeof firms.$inferSelect;
 export type FirmStatus = (typeof firmStatus.enumValues)[number];
@@ -901,3 +1116,14 @@ export type EngagementStatus = (typeof engagementStatus.enumValues)[number];
 export type ServiceType = (typeof serviceType.enumValues)[number];
 export type ClientType = (typeof clientType.enumValues)[number];
 export type ClientStatus = (typeof clientStatus.enumValues)[number];
+export type TaxPreparationStatus = (typeof taxPreparationStatus.enumValues)[number];
+export type TaxChecklistStatus = (typeof taxChecklistStatus.enumValues)[number];
+export type TaxReturnStatus = (typeof taxReturnStatus.enumValues)[number];
+export type TaxFilingType = (typeof taxFilingType.enumValues)[number];
+export type TaxReviewStatus = (typeof taxReviewStatus.enumValues)[number];
+export type TaxAuthorizationStatus = (typeof taxAuthorizationStatus.enumValues)[number];
+export type TaxFilingStatus = (typeof taxFilingStatus.enumValues)[number];
+export type TaxAuthorityStatus = (typeof taxAuthorityStatus.enumValues)[number];
+export type TaxPreparationCase = typeof taxPreparationCases.$inferSelect;
+export type TaxPreparationChecklistItem = typeof taxPreparationChecklistItems.$inferSelect;
+export type TaxReturn = typeof taxReturns.$inferSelect;

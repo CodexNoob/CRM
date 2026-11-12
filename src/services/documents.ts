@@ -8,7 +8,7 @@ import { checkFile } from "@/lib/file-rules";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { databaseStorage, noScanner, type FileStorage, type MalwareScanner } from "@/lib/storage";
 import { isUuid } from "@/lib/validation";
-import { assertClientAccess, inFirm, visibleClientsCondition } from "./access";
+import { assertClientAccess, inFirm, requireWriter, visibleClientsCondition } from "./access";
 import { recordAudit } from "./audit";
 
 export interface DocumentDeps {
@@ -47,9 +47,11 @@ async function resolveUploadTarget(db: Db, actor: Actor, clientId: string, engag
 export async function uploadDocument(
   db: Db,
   actor: Actor,
-  input: { clientId: string; engagementId?: string; visibleToClient?: boolean; fileName: string; data: Buffer },
+  /** `taskId` must already be validated by the caller (services/tasks.ts) as a task of this client. */
+  input: { clientId: string; engagementId?: string; taskId?: string; visibleToClient?: boolean; fileName: string; data: Buffer },
   deps: DocumentDeps = {},
 ): Promise<DocumentRow> {
+  if (actor.role !== "client") requireWriter(actor);
   const storage = deps.storage ?? databaseStorage(db);
   const scanner = deps.scanner ?? noScanner;
   await resolveUploadTarget(db, actor, input.clientId, input.engagementId);
@@ -69,6 +71,7 @@ export async function uploadDocument(
       firmId: actor.firmId,
       clientId: input.clientId,
       engagementId: input.engagementId ?? null,
+      taskId: input.taskId ?? null,
       fileName,
       contentType,
       sizeBytes: input.data.length,
@@ -186,6 +189,7 @@ export async function getDocumentForDownload(
 
 export async function setDocumentShared(db: Db, actor: Actor, id: string, shared: boolean): Promise<void> {
   if (actor.role === "client") throw new ForbiddenError();
+  requireWriter(actor);
   const doc = await loadAccessibleDocument(db, actor, id);
   if (doc.uploadedByClient && !shared) throw new ValidationError({ _form: ["Files the client uploaded always stay visible to them."] });
   await db.update(documents).set({ visibleToClient: shared }).where(and(eq(documents.id, id), inFirm(documents.firmId, actor)));
@@ -195,6 +199,7 @@ export async function setDocumentShared(db: Db, actor: Actor, id: string, shared
 /** Removes a document from view. The stored bytes are retained per the firm's retention policy. */
 export async function archiveDocument(db: Db, actor: Actor, id: string): Promise<void> {
   if (actor.role === "client") throw new ForbiddenError();
+  requireWriter(actor);
   await loadAccessibleDocument(db, actor, id);
   await db.update(documents).set({ deletedAt: new Date() }).where(and(eq(documents.id, id), inFirm(documents.firmId, actor)));
   await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "document.archive", entityType: "document", entityId: id });

@@ -9,7 +9,7 @@ import { zonedLocalToUtc } from "@/lib/time";
 import { cancelAppointment, createAppointment, getCalendar, listPortalAppointments } from "@/services/calendar";
 import { createEngagement, createTask } from "@/services/engagements";
 import { archiveDocument, getDocumentForDownload, listClientDocuments, listPortalDocuments, setDocumentShared, uploadDocument } from "@/services/documents";
-import { convertLead, countLeadsByStatus, createLead, listLeads, SpamRejectedError, submitWebsiteInquiry, updateLead } from "@/services/leads";
+import { AlreadyConvertedError, convertLead, countLeadsByStatus, createLead, listLeads, setLeadStatus, SpamRejectedError, submitWebsiteInquiry, updateLead } from "@/services/leads";
 import { countUnreadForClient, countUnreadForStaff, getThread, listConversations, sendMessage } from "@/services/messages";
 import { createClientWithPortalUser, createTestDb, createUser } from "./helpers";
 
@@ -73,10 +73,12 @@ describe("leads", () => {
 
   it("lets staff work the pipeline and convert a lead into a client", async () => {
     const lead = await createLead(h.db, prepA, { name: "Riley Prospect", email: "riley@example.test", company: "Riley Co", source: "referral" });
-    const updated = await updateLead(h.db, prepA, lead.id, { name: "Riley Prospect", email: "riley@example.test", company: "Riley Co", source: "referral", status: "qualified", followUpDate: "2027-01-05", notes: "Wants S-corp advice" });
-    expect(updated.status).toBe("qualified");
-    const { clientId } = await convertLead(h.db, prepA, lead.id);
-    expect((await convertLead(h.db, prepA, lead.id)).clientId).toBe(clientId); // idempotent
+    const updated = await updateLead(h.db, prepA, lead.id, { name: "Riley Prospect", email: "riley@example.test", company: "Riley Co", source: "referral", followUpDate: "2027-01-05", notes: "Wants S-corp advice" });
+    expect(updated.notes).toBe("Wants S-corp advice");
+    await setLeadStatus(h.db, prepA, lead.id, "qualified");
+    const { clientId } = await convertLead(h.db, prepA, lead.id, { mode: "new", type: "business", displayName: "Riley Co" });
+    // A second conversion is refused and creates nothing.
+    await expect(convertLead(h.db, prepA, lead.id, { mode: "new", type: "business", displayName: "Riley Co", confirmNotDuplicate: "on" })).rejects.toBeInstanceOf(AlreadyConvertedError);
     expect((await listLeads(h.db, prepA, { status: "converted" })).some((l) => l.convertedClientId === clientId)).toBe(true);
     await expect(updateLead(h.db, prepA, lead.id, { name: "x", source: "other", status: "new" })).rejects.toBeInstanceOf(ValidationError);
     expect((await countLeadsByStatus(h.db, admin)).converted).toBeGreaterThanOrEqual(1);

@@ -3,7 +3,9 @@ import type { DbHandle } from "@/db";
 import type { Actor } from "@/lib/auth/actor";
 import { ForbiddenError } from "@/lib/errors";
 import { createClient } from "@/services/clients";
-import { firmToday, getDashboard } from "@/services/dashboard";
+import { firmToday, getDashboard, getWorkspaceOverview } from "@/services/dashboard";
+import { listWorkspaceActivity } from "@/services/insights";
+import { getNotifications } from "@/services/workspace";
 import { createEngagement, createTask, getEngagement } from "@/services/engagements";
 import { createTestDb, createUser } from "./helpers";
 
@@ -16,8 +18,8 @@ beforeAll(async () => {
   admin = await createUser(h.db, { role: "admin" });
   prepA = await createUser(h.db, { role: "employee" });
   prepB = await createUser(h.db, { role: "employee" });
-  const a = await createClient(h.db, admin, { type: "individual", displayName: "Alpha Client" });
-  const b = await createClient(h.db, admin, { type: "individual", displayName: "Beta Client" });
+  const a = await createClient(h.db, admin, { type: "individual", displayName: "Alpha Client", status: "active" });
+  const b = await createClient(h.db, admin, { type: "individual", displayName: "Beta Client", status: "active" });
   const e = (clientId: string, ownerId: string, status: string, dueDate?: string) =>
     createEngagement(h.db, admin, clientId, { title: `${status} ${dueDate ?? ""}`, serviceType: "individual_tax", status, ownerId, dueDate });
 
@@ -61,6 +63,28 @@ describe("dashboard", () => {
     expect(mine.metrics.open).toBe(0);
     const client = await createUser(h.db, { role: "client" });
     await expect(getDashboard(h.db, client)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("builds the workspace overview, activity feed and assignment notifications from real records", async () => {
+    const o = await getWorkspaceOverview(h.db, admin, { now: NOW });
+    expect(o.kpis).toMatchObject({ totalClients: 2, activeClients: 2, activeEngagements: 4, newLeads: 0 });
+    expect(o.tasks.teamOpen).toBe(1);
+    expect(o.kpis.awaitingReview).toBe(1); // the in_review engagement
+    const scoped = await getWorkspaceOverview(h.db, prepA, { now: NOW });
+    expect(scoped.kpis.totalClients).toBe(1);
+    expect(scoped.tasks.teamOpen).toBe(0);
+
+    const feed = await listWorkspaceActivity(h.db, admin);
+    expect(feed.some((a) => a.entityType === "engagement" && a.entityName)).toBe(true);
+    expect(feed.some((a) => a.entityType === "task" && a.type === "assignment" && a.entityName === "Review")).toBe(true);
+    expect((await listWorkspaceActivity(h.db, prepA)).every((a) => a.entityType !== "task")).toBe(true); // B's task is not visible to A
+
+    const n = await getNotifications(h.db, prepB);
+    expect(n.some((i) => i.label === "You were assigned to Review")).toBe(true);
+    // prepA manages engagements (assigned by the admin) but was never given B's task.
+    const a = await getNotifications(h.db, prepA);
+    expect(a.some((i) => i.label.startsWith("You were assigned") && i.href.startsWith("/staff/engagements/"))).toBe(true);
+    expect(a.some((i) => i.label === "You were assigned to Review")).toBe(false);
   });
 
   it("uses the firm's time zone for today", () => {

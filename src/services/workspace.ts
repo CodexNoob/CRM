@@ -1,7 +1,7 @@
 import { TASK_OPEN, ENGAGEMENT_DONE } from "@/lib/status";
-import { and, desc, eq, ilike, isNotNull, isNull, lt, notInArray, or, sql, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, isNotNull, isNull, lt, ne, notInArray, or, sql, inArray } from "drizzle-orm";
 import type { Db } from "@/db";
-import { clients, documents, engagements, leads, tasks } from "@/db/schema";
+import { activities, clients, documents, engagements, leads, tasks, users } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
 import { inFirm, requireStaff, visibleClientsCondition } from "./access";
 import { firmToday } from "./dashboard";
@@ -50,12 +50,47 @@ export async function getNotifications(db: Db, actor: Actor): Promise<Notificati
       ),
   ]);
   const items: NotificationItem[] = [
-    { id: "overdue", label: "Overdue engagements", detail: "Past their due date", count: overdue[0]?.n ?? 0, href: "/staff/engagements", tone: "danger" },
+    { id: "overdue", label: "Overdue engagements", detail: "Past their due date", count: overdue[0]?.n ?? 0, href: "/staff/engagements?due=overdue", tone: "danger" },
     { id: "tasks", label: "Your tasks due", detail: "Due today or overdue", count: myOverdueTasks[0]?.n ?? 0, href: "/staff/tasks", tone: "warn" },
     { id: "messages", label: "Unread client messages", detail: "Waiting for a reply", count: unread, href: "/staff/messages", tone: "info" },
     { id: "leads", label: "New leads", detail: "Not yet contacted", count: leadCounts.new, href: "/staff/leads?status=new", tone: "info" },
   ];
-  return items.filter((i) => i.count > 0);
+  return [...items.filter((i) => i.count > 0), ...(await personalNotifications(db, actor))];
+}
+
+/**
+ * Things that happened TO the actor in the last 14 days, from the activity timeline:
+ * someone assigned them a task or engagement, or an engagement they manage became ready for review.
+ * Only records the actor can still open are listed.
+ */
+async function personalNotifications(db: Db, actor: Actor): Promise<NotificationItem[]> {
+  const since = new Date(Date.now() - 14 * 86_400_000);
+  const visible = visibleClientsCondition(db, actor);
+  const rows = await db
+    .select({ id: activities.id, entityType: activities.entityType, entityId: activities.entityId, type: activities.type, metadata: activities.metadata, actorName: users.name })
+    .from(activities)
+    .leftJoin(users, eq(users.id, activities.actorId))
+    .where(
+      and(
+        inFirm(activities.firmId, actor),
+        gte(activities.occurredAt, since),
+        or(isNull(activities.clientId), sql`exists (select 1 from ${clients} where ${clients.id} = ${activities.clientId} and ${visible})`),
+        or(
+          and(eq(activities.type, "assignment"), sql`${activities.metadata} ->> 'userId' = ${actor.userId}`, or(isNull(activities.actorId), ne(activities.actorId, actor.userId))),
+          and(sql`${activities.metadata} ->> 'kind' = 'ready_for_review'`, sql`${activities.metadata} ->> 'notifyUserId' = ${actor.userId}`),
+        ),
+      ),
+    )
+    .orderBy(desc(activities.occurredAt))
+    .limit(8);
+  return rows.map((r) => {
+    const title = typeof r.metadata?.title === "string" ? r.metadata.title : r.entityType === "task" ? "a task" : "an engagement";
+    const href = r.entityType === "task" ? `/staff/tasks/${r.entityId}` : `/staff/engagements/${r.entityId}`;
+    if (r.type === "assignment") {
+      return { id: `assign-${r.id}`, label: `You were assigned to ${title}`, detail: r.actorName ? `By ${r.actorName}` : r.entityType === "task" ? "Task" : "Engagement team", count: 1, href, tone: "info" as const };
+    }
+    return { id: `review-${r.id}`, label: `${title} is ready for review`, detail: "All tasks are completed", count: 1, href, tone: "warn" as const };
+  });
 }
 
 /* ───────── Global search ───────── */
