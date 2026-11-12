@@ -78,6 +78,27 @@
       "when": 1794455807299,
       "tag": "0010_restrict_api_roles_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794457819985,
+      "tag": "0011_multi_firm",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794457869001,
+      "tag": "0012_firm_profile_per_firm",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794457882485,
+      "tag": "0013_restrict_api_roles_firms",
+      "breakpoints": true
     }
   ]
 }

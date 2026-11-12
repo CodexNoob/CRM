@@ -31,7 +31,7 @@ function requireClientActor(actor: Actor): string {
 export async function getPortalOverview(db: Db, actor: Actor): Promise<PortalOverview> {
   const clientId = requireClientActor(actor);
 
-  const [client] = await db.select({ name: clients.displayName }).from(clients).where(eq(clients.id, clientId));
+  const [client] = await db.select({ name: clients.displayName }).from(clients).where(and(eq(clients.id, clientId), eq(clients.firmId, actor.firmId)));
 
   const rows = await db
     .select({
@@ -45,7 +45,7 @@ export async function getPortalOverview(db: Db, actor: Actor): Promise<PortalOve
     })
     .from(engagements)
     .innerJoin(users, eq(users.id, engagements.ownerId))
-    .where(eq(engagements.clientId, clientId))
+    .where(and(eq(engagements.firmId, actor.firmId), eq(engagements.clientId, clientId)))
     .orderBy(desc(engagements.createdAt));
 
   const ids = rows.map((r) => r.id);
@@ -59,7 +59,7 @@ export async function getPortalOverview(db: Db, actor: Actor): Promise<PortalOve
           dueDate: tasks.dueDate,
         })
         .from(tasks)
-        .where(and(inArray(tasks.engagementId, ids), eq(tasks.isClientTask, true)))
+        .where(and(eq(tasks.firmId, actor.firmId), inArray(tasks.engagementId, ids), eq(tasks.isClientTask, true)))
         .orderBy(asc(tasks.status), sql`${tasks.dueDate} asc nulls last`, asc(tasks.createdAt))
     : [];
 

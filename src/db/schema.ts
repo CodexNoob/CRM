@@ -3,6 +3,7 @@ import {
   boolean,
   customType,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -11,6 +12,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -48,10 +50,40 @@ const timestamps = {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 };
 
+/* ───────────────────────── Tenancy ───────────────────────── */
+
+export const firmStatus = pgEnum("firm_status", ["trial", "active", "past_due", "cancelled"]);
+
+/**
+ * A subscribing firm (tenant). EVERY firm-owned row carries `firm_id`, and every
+ * service query is limited to the signed-in actor's firm. Composite foreign keys
+ * (firm_id, x_id) make it impossible at the database level to link a row to
+ * another firm's client, engagement or staff member.
+ */
+export const firms = pgTable(
+  "firms",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    /** URL-safe handle for the firm's public page (/f/<slug>). */
+    slug: text("slug").notNull(),
+    status: firmStatus("status").notNull().default("trial"),
+    trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("firms_slug_unique").on(t.slug)],
+).enableRLS();
+
+const firmId = () =>
+  uuid("firm_id")
+    .notNull()
+    .references(() => firms.id, { onDelete: "restrict" });
+
 export const clients = pgTable(
   "clients",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
     type: clientType("type").notNull(),
     displayName: text("display_name").notNull(),
     email: text("email"),
@@ -60,13 +92,19 @@ export const clients = pgTable(
     createdById: uuid("created_by_id").notNull(),
     ...timestamps,
   },
-  (t) => [index("clients_display_name_idx").on(t.displayName)],
+  (t) => [
+    index("clients_display_name_idx").on(t.displayName),
+    index("clients_firm_idx").on(t.firmId),
+    // Target of the composite (firm_id, client_id) foreign keys below.
+    unique("clients_firm_id_id_unique").on(t.firmId, t.id),
+  ],
 ).enableRLS();
 
 export const users = pgTable(
   "users",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
     email: text("email").notNull(),
     name: text("name").notNull(),
     role: userRole("role").notNull(),
@@ -80,8 +118,12 @@ export const users = pgTable(
     ...timestamps,
   },
   (t) => [
+    // One login per email across the whole service (a person signs in to exactly one firm).
     uniqueIndex("users_email_unique").on(sql`lower(${t.email})`),
     index("users_client_id_idx").on(t.clientId),
+    index("users_firm_idx").on(t.firmId),
+    unique("users_firm_id_id_unique").on(t.firmId, t.id),
+    foreignKey({ name: "users_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
   ],
 ).enableRLS();
 
@@ -119,6 +161,7 @@ export const invitations = pgTable(
 export const clientAssignments = pgTable(
   "client_assignments",
   {
+    firmId: firmId(),
     clientId: uuid("client_id")
       .notNull()
       .references(() => clients.id, { onDelete: "cascade" }),
@@ -127,13 +170,19 @@ export const clientAssignments = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.clientId, t.userId] }), index("client_assignments_user_idx").on(t.userId)],
+  (t) => [
+    primaryKey({ columns: [t.clientId, t.userId] }),
+    index("client_assignments_user_idx").on(t.userId),
+    foreignKey({ name: "client_assignments_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+    foreignKey({ name: "client_assignments_firm_user_fk", columns: [t.firmId, t.userId], foreignColumns: [users.firmId, users.id] }),
+  ],
 ).enableRLS();
 
 export const engagements = pgTable(
   "engagements",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
     clientId: uuid("client_id")
       .notNull()
       .references(() => clients.id, { onDelete: "restrict" }),
@@ -151,6 +200,10 @@ export const engagements = pgTable(
     index("engagements_client_idx").on(t.clientId),
     index("engagements_owner_idx").on(t.ownerId),
     index("engagements_due_idx").on(t.dueDate),
+    index("engagements_firm_idx").on(t.firmId),
+    unique("engagements_firm_id_id_unique").on(t.firmId, t.id),
+    foreignKey({ name: "engagements_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+    foreignKey({ name: "engagements_firm_owner_fk", columns: [t.firmId, t.ownerId], foreignColumns: [users.firmId, users.id] }),
   ],
 ).enableRLS();
 
@@ -158,6 +211,7 @@ export const tasks = pgTable(
   "tasks",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
     engagementId: uuid("engagement_id")
       .notNull()
       .references(() => engagements.id, { onDelete: "cascade" }),
@@ -172,7 +226,12 @@ export const tasks = pgTable(
     completedById: uuid("completed_by_id").references(() => users.id, { onDelete: "set null" }),
     ...timestamps,
   },
-  (t) => [index("tasks_engagement_idx").on(t.engagementId)],
+  (t) => [
+    index("tasks_engagement_idx").on(t.engagementId),
+    index("tasks_firm_idx").on(t.firmId),
+    foreignKey({ name: "tasks_firm_engagement_fk", columns: [t.firmId, t.engagementId], foreignColumns: [engagements.firmId, engagements.id] }),
+    foreignKey({ name: "tasks_firm_assignee_fk", columns: [t.firmId, t.assigneeId], foreignColumns: [users.firmId, users.id] }),
+  ],
 ).enableRLS();
 
 /**
@@ -183,6 +242,8 @@ export const auditEvents = pgTable(
   "audit_events",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** The firm the event belongs to. Null only for service-level (platform) events. */
+    firmId: uuid("firm_id").references(() => firms.id, { onDelete: "restrict" }),
     actorUserId: uuid("actor_user_id"),
     action: text("action").notNull(),
     entityType: text("entity_type").notNull(),
@@ -190,7 +251,7 @@ export const auditEvents = pgTable(
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("audit_entity_idx").on(t.entityType, t.entityId), index("audit_created_idx").on(t.createdAt)],
+  (t) => [index("audit_entity_idx").on(t.entityType, t.entityId), index("audit_created_idx").on(t.createdAt), index("audit_firm_created_idx").on(t.firmId, t.createdAt)],
 ).enableRLS();
 
 /* ───────────────────────── Phase 1: leads, documents, messages, calendar ───────────────────────── */
@@ -202,6 +263,7 @@ export const leads = pgTable(
   "leads",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
     name: text("name").notNull(),
     email: text("email"),
     phone: text("phone"),
@@ -220,7 +282,13 @@ export const leads = pgTable(
     consentAt: timestamp("consent_at", { withTimezone: true }),
     ...timestamps,
   },
-  (t) => [index("leads_status_idx").on(t.status), index("leads_owner_idx").on(t.ownerId)],
+  (t) => [
+    index("leads_status_idx").on(t.status),
+    index("leads_owner_idx").on(t.ownerId),
+    index("leads_firm_idx").on(t.firmId),
+    foreignKey({ name: "leads_firm_owner_fk", columns: [t.firmId, t.ownerId], foreignColumns: [users.firmId, users.id] }),
+    foreignKey({ name: "leads_firm_client_fk", columns: [t.firmId, t.convertedClientId], foreignColumns: [clients.firmId, clients.id] }),
+  ],
 ).enableRLS();
 
 export const scanStatus = pgEnum("scan_status", ["not_scanned", "pending", "clean", "infected"]);
@@ -230,6 +298,7 @@ export const documents = pgTable(
   "documents",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
     clientId: uuid("client_id")
       .notNull()
       .references(() => clients.id, { onDelete: "restrict" }),
@@ -246,7 +315,13 @@ export const documents = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("documents_client_idx").on(t.clientId), index("documents_engagement_idx").on(t.engagementId)],
+  (t) => [
+    index("documents_client_idx").on(t.clientId),
+    index("documents_engagement_idx").on(t.engagementId),
+    index("documents_firm_idx").on(t.firmId),
+    foreignKey({ name: "documents_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+    foreignKey({ name: "documents_firm_engagement_fk", columns: [t.firmId, t.engagementId], foreignColumns: [engagements.firmId, engagements.id] }),
+  ],
 ).enableRLS();
 
 const bytea = customType<{ data: Buffer; driverData: Buffer | Uint8Array }>({
@@ -266,6 +341,7 @@ export const messages = pgTable(
   "messages",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
     clientId: uuid("client_id")
       .notNull()
       .references(() => clients.id, { onDelete: "restrict" }),
@@ -276,7 +352,11 @@ export const messages = pgTable(
     readAt: timestamp("read_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("messages_client_idx").on(t.clientId, t.createdAt)],
+  (t) => [
+    index("messages_client_idx").on(t.clientId, t.createdAt),
+    index("messages_firm_idx").on(t.firmId),
+    foreignKey({ name: "messages_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+  ],
 ).enableRLS();
 
 export const appointmentKind = pgEnum("appointment_kind", ["in_person", "phone", "video", "internal"]);
@@ -285,6 +365,7 @@ export const appointments = pgTable(
   "appointments",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
     title: text("title").notNull(),
     clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
     ownerId: uuid("owner_id")
@@ -299,14 +380,22 @@ export const appointments = pgTable(
     createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
     ...timestamps,
   },
-  (t) => [index("appointments_starts_idx").on(t.startsAt), index("appointments_client_idx").on(t.clientId)],
+  (t) => [
+    index("appointments_starts_idx").on(t.startsAt),
+    index("appointments_client_idx").on(t.clientId),
+    index("appointments_firm_idx").on(t.firmId, t.startsAt),
+    foreignKey({ name: "appointments_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+    foreignKey({ name: "appointments_firm_owner_fk", columns: [t.firmId, t.ownerId], foreignColumns: [users.firmId, users.id] }),
+  ],
 ).enableRLS();
 
 /* ───────────────────────── Firm settings (drive the public website) ───────────────────────── */
 
-/** Single-row table (id = 1) holding the firm's public details. */
+/** One row per firm holding its public details (shown on the firm's public page). */
 export const firmProfile = pgTable("firm_profile", {
-  id: integer("id").primaryKey().default(1),
+  firmId: uuid("firm_id")
+    .primaryKey()
+    .references(() => firms.id, { onDelete: "restrict" }),
   name: text("name").notNull(),
   phone: text("phone"),
   email: text("email"),
@@ -322,6 +411,7 @@ export const announcements = pgTable(
   "announcements",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
     title: text("title").notNull(),
     body: text("body").notNull(),
     publishedOn: date("published_on", { mode: "string" }).notNull(),
@@ -329,7 +419,7 @@ export const announcements = pgTable(
     createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
     ...timestamps,
   },
-  (t) => [index("announcements_published_idx").on(t.isPublished, t.publishedOn)],
+  (t) => [index("announcements_published_idx").on(t.isPublished, t.publishedOn), index("announcements_firm_idx").on(t.firmId)],
 ).enableRLS();
 
 /* ───────────────────────── Invoices (PayPal is the system of record) ───────────────────────── */
@@ -345,6 +435,7 @@ export const invoices = pgTable(
   "invoices",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
     clientId: uuid("client_id")
       .notNull()
       .references(() => clients.id, { onDelete: "restrict" }),
@@ -373,6 +464,9 @@ export const invoices = pgTable(
     index("invoices_client_idx").on(t.clientId, t.createdAt),
     index("invoices_status_idx").on(t.status),
     uniqueIndex("invoices_paypal_id_unique").on(t.paypalInvoiceId),
+    index("invoices_firm_idx").on(t.firmId),
+    foreignKey({ name: "invoices_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+    foreignKey({ name: "invoices_firm_engagement_fk", columns: [t.firmId, t.engagementId], foreignColumns: [engagements.firmId, engagements.id] }),
   ],
 ).enableRLS();
 
@@ -388,6 +482,7 @@ export const subscriptions = pgTable(
   "subscriptions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
     clientId: uuid("client_id")
       .notNull()
       .references(() => clients.id, { onDelete: "restrict" }),
@@ -408,10 +503,17 @@ export const subscriptions = pgTable(
     createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
     ...timestamps,
   },
-  (t) => [index("subscriptions_client_idx").on(t.clientId, t.createdAt), uniqueIndex("subscriptions_paypal_id_unique").on(t.paypalSubscriptionId)],
+  (t) => [
+    index("subscriptions_client_idx").on(t.clientId, t.createdAt),
+    uniqueIndex("subscriptions_paypal_id_unique").on(t.paypalSubscriptionId),
+    index("subscriptions_firm_idx").on(t.firmId),
+    foreignKey({ name: "subscriptions_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+  ],
 ).enableRLS();
 
 export type User = typeof users.$inferSelect;
+export type Firm = typeof firms.$inferSelect;
+export type FirmStatus = (typeof firmStatus.enumValues)[number];
 export type Subscription = typeof subscriptions.$inferSelect;
 export type SubscriptionStatus = (typeof subscriptionStatus.enumValues)[number];
 export type BillingInterval = (typeof billingInterval.enumValues)[number];

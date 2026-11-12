@@ -6,6 +6,7 @@ import { site, announcements as defaultAnnouncements } from "@/content/site";
 import type { Actor } from "@/lib/auth/actor";
 import { ForbiddenError, NotFoundError } from "@/lib/errors";
 import { isUuid, parseInput } from "@/lib/validation";
+import { inFirm } from "./access";
 import { recordAudit } from "./audit";
 
 /**
@@ -34,8 +35,9 @@ const DEFAULTS: PublicFirmProfile = {
   fromDatabase: false,
 };
 
-export async function getPublicProfile(db: Db): Promise<PublicFirmProfile> {
-  const [row] = await db.select().from(firmProfile).where(eq(firmProfile.id, 1));
+/** The public details of one firm. Falls back to the defaults until its admin saves a profile. */
+export async function getPublicProfile(db: Db, firmId: string): Promise<PublicFirmProfile> {
+  const [row] = await db.select().from(firmProfile).where(eq(firmProfile.firmId, firmId));
   if (!row) return DEFAULTS;
   return {
     name: row.name,
@@ -48,24 +50,24 @@ export async function getPublicProfile(db: Db): Promise<PublicFirmProfile> {
   };
 }
 
-export async function getPublicAnnouncements(db: Db, limit = 5) {
+export async function getPublicAnnouncements(db: Db, firmId: string, limit = 5) {
   const rows = await db
     .select({ id: announcements.id, title: announcements.title, body: announcements.body, date: announcements.publishedOn })
     .from(announcements)
-    .where(eq(announcements.isPublished, true))
+    .where(and(eq(announcements.firmId, firmId), eq(announcements.isPublished, true)))
     .orderBy(desc(announcements.publishedOn))
     .limit(limit);
   return rows;
 }
 
 /** True once the firm has started managing announcements in the CRM (then defaults are not shown). */
-export async function hasManagedAnnouncements(db: Db) {
-  const [row] = await db.select({ id: announcements.id }).from(announcements).limit(1);
+export async function hasManagedAnnouncements(db: Db, firmId: string) {
+  const [row] = await db.select({ id: announcements.id }).from(announcements).where(eq(announcements.firmId, firmId)).limit(1);
   return !!row;
 }
 
-export async function getWebsiteContent(db: Db) {
-  const [profile, managed, list] = await Promise.all([getPublicProfile(db), hasManagedAnnouncements(db), getPublicAnnouncements(db)]);
+export async function getWebsiteContent(db: Db, firmId: string) {
+  const [profile, managed, list] = await Promise.all([getPublicProfile(db, firmId), hasManagedAnnouncements(db, firmId), getPublicAnnouncements(db, firmId)]);
   return {
     profile,
     announcements: managed ? list : defaultAnnouncements.map((a, i) => ({ id: `default-${i}`, title: a.title, body: a.body, date: a.date })),
@@ -115,8 +117,8 @@ export async function saveFirmProfile(db: Db, actor: Actor, input: unknown) {
     updatedById: actor.userId,
     updatedAt: new Date(),
   };
-  await db.insert(firmProfile).values({ id: 1, ...values }).onConflictDoUpdate({ target: firmProfile.id, set: values });
-  await recordAudit(db, { actorUserId: actor.userId, action: "settings.firm_profile", entityType: "settings", entityId: "firm_profile" });
+  await db.insert(firmProfile).values({ firmId: actor.firmId, ...values }).onConflictDoUpdate({ target: firmProfile.firmId, set: values });
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "settings.firm_profile", entityType: "settings", entityId: "firm_profile" });
 }
 
 const announcementSchema = z.object({
@@ -127,21 +129,21 @@ const announcementSchema = z.object({
 
 export async function listAllAnnouncements(db: Db, actor: Actor) {
   requireAdmin(actor);
-  return db.select().from(announcements).orderBy(desc(announcements.publishedOn), desc(announcements.createdAt));
+  return db.select().from(announcements).where(inFirm(announcements.firmId, actor)).orderBy(desc(announcements.publishedOn), desc(announcements.createdAt));
 }
 
 export async function createAnnouncement(db: Db, actor: Actor, input: unknown) {
   requireAdmin(actor);
   const d = parseInput(announcementSchema, input);
-  const [row] = await db.insert(announcements).values({ ...d, createdById: actor.userId }).returning();
-  await recordAudit(db, { actorUserId: actor.userId, action: "settings.announcement_create", entityType: "announcement", entityId: row!.id });
+  const [row] = await db.insert(announcements).values({ ...d, firmId: actor.firmId, createdById: actor.userId }).returning();
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "settings.announcement_create", entityType: "announcement", entityId: row!.id });
   return row!;
 }
 
 export async function setAnnouncementPublished(db: Db, actor: Actor, id: string, published: boolean) {
   requireAdmin(actor);
   if (!isUuid(id)) throw new NotFoundError();
-  const res = await db.update(announcements).set({ isPublished: published, updatedAt: new Date() }).where(and(eq(announcements.id, id))).returning({ id: announcements.id });
+  const res = await db.update(announcements).set({ isPublished: published, updatedAt: new Date() }).where(and(eq(announcements.id, id), inFirm(announcements.firmId, actor))).returning({ id: announcements.id });
   if (!res.length) throw new NotFoundError();
-  await recordAudit(db, { actorUserId: actor.userId, action: published ? "settings.announcement_publish" : "settings.announcement_unpublish", entityType: "announcement", entityId: id });
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: published ? "settings.announcement_publish" : "settings.announcement_unpublish", entityType: "announcement", entityId: id });
 }

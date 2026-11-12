@@ -4,7 +4,7 @@ import { clients, messages, users } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
 import { ForbiddenError } from "@/lib/errors";
 import { messageBodySchema, parseInput } from "@/lib/validation";
-import { assertClientAccess, requireStaff, visibleClientsCondition } from "./access";
+import { assertClientAccess, inFirm, requireStaff, visibleClientsCondition } from "./access";
 import { recordAudit } from "./audit";
 
 /**
@@ -27,9 +27,9 @@ export async function sendMessage(db: Db, actor: Actor, body: unknown, clientId?
   const text = parseInput(messageBodySchema, body);
   const [msg] = await db
     .insert(messages)
-    .values({ clientId: threadClientId, authorId: actor.userId, fromClient: actor.role === "client", body: text })
+    .values({ firmId: actor.firmId, clientId: threadClientId, authorId: actor.userId, fromClient: actor.role === "client", body: text })
     .returning();
-  await recordAudit(db, { actorUserId: actor.userId, action: "message.send", entityType: "client", entityId: threadClientId });
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "message.send", entityType: "client", entityId: threadClientId });
   return msg!;
 }
 
@@ -49,12 +49,12 @@ export async function getThread(db: Db, actor: Actor, clientId?: string): Promis
   await db
     .update(messages)
     .set({ readAt: new Date() })
-    .where(and(eq(messages.clientId, threadClientId), eq(messages.fromClient, !readerIsClient), isNull(messages.readAt)));
+    .where(and(inFirm(messages.firmId, actor), eq(messages.clientId, threadClientId), eq(messages.fromClient, !readerIsClient), isNull(messages.readAt)));
   const rows = await db
     .select({ id: messages.id, body: messages.body, fromClient: messages.fromClient, authorName: users.name, authorId: messages.authorId, createdAt: messages.createdAt })
     .from(messages)
-    .leftJoin(users, eq(users.id, messages.authorId))
-    .where(eq(messages.clientId, threadClientId))
+    .leftJoin(users, and(eq(users.id, messages.authorId), eq(users.firmId, messages.firmId)))
+    .where(and(inFirm(messages.firmId, actor), eq(messages.clientId, threadClientId)))
     .orderBy(asc(messages.createdAt))
     .limit(500);
   return rows.map(({ authorId, ...r }) => ({ ...r, mine: authorId === actor.userId }));
@@ -80,6 +80,7 @@ export async function listConversations(db: Db, actor: Actor): Promise<Conversat
       createdAt: messages.createdAt,
     })
     .from(messages)
+    .where(inFirm(messages.firmId, actor))
     .orderBy(messages.clientId, desc(messages.createdAt))
     .as("latest");
   const rows = await db
@@ -89,7 +90,7 @@ export async function listConversations(db: Db, actor: Actor): Promise<Conversat
       lastBody: latest.body,
       lastFromClient: latest.fromClient,
       lastAt: latest.createdAt,
-      unread: sql<number>`(select count(*)::int from ${messages} m where m.client_id = ${clients.id} and m.from_client and m.read_at is null)`,
+      unread: sql<number>`(select count(*)::int from ${messages} m where m.firm_id = ${actor.firmId} and m.client_id = ${clients.id} and m.from_client and m.read_at is null)`,
     })
     .from(latest)
     .innerJoin(clients, eq(clients.id, latest.clientId))
@@ -106,7 +107,7 @@ export async function countUnreadForStaff(db: Db, actor: Actor): Promise<number>
     .select({ n: sql<number>`count(*)::int` })
     .from(messages)
     .innerJoin(clients, eq(clients.id, messages.clientId))
-    .where(and(visible, eq(messages.fromClient, true), isNull(messages.readAt)));
+    .where(and(inFirm(messages.firmId, actor), visible, eq(messages.fromClient, true), isNull(messages.readAt)));
   return row?.n ?? 0;
 }
 
@@ -115,6 +116,6 @@ export async function countUnreadForClient(db: Db, actor: Actor): Promise<number
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(messages)
-    .where(and(eq(messages.clientId, actor.clientId), eq(messages.fromClient, false), isNull(messages.readAt)));
+    .where(and(inFirm(messages.firmId, actor), eq(messages.clientId, actor.clientId), eq(messages.fromClient, false), isNull(messages.readAt)));
   return row?.n ?? 0;
 }

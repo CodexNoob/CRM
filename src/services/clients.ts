@@ -5,7 +5,7 @@ import type { Actor } from "@/lib/auth/actor";
 import { NotFoundError } from "@/lib/errors";
 import { clientInputSchema, clientSearchSchema, parseInput } from "@/lib/validation";
 import { recordAudit } from "./audit";
-import { assertClientAccess, ensureAssignment, requireStaff, visibleClientsCondition } from "./access";
+import { assertClientAccess, ensureAssignment, inFirm, requireStaff, visibleClientsCondition } from "./access";
 
 export const CLIENT_LIST_LIMIT = 100;
 
@@ -23,14 +23,14 @@ export async function listClients(db: Db, actor: Actor, params: { q?: unknown } 
   return db
     .select()
     .from(clients)
-    .where(and(visible, search))
+    .where(and(inFirm(clients.firmId, actor), visible, search))
     .orderBy(asc(clients.displayName))
     .limit(CLIENT_LIST_LIMIT);
 }
 
 export async function getClient(db: Db, actor: Actor, clientId: string): Promise<Client> {
   await assertClientAccess(db, actor, clientId);
-  const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
+  const [client] = await db.select().from(clients).where(and(eq(clients.id, clientId), inFirm(clients.firmId, actor))).limit(1);
   if (!client) throw new NotFoundError();
   return client;
 }
@@ -41,18 +41,20 @@ export async function createClient(db: Db, actor: Actor, input: unknown): Promis
   return db.transaction(async (tx) => {
     const [client] = await tx
       .insert(clients)
-      .values({ ...data, email: data.email ?? null, phone: data.phone ?? null, createdById: actor.userId })
+      .values({ ...data, firmId: actor.firmId, email: data.email ?? null, phone: data.phone ?? null, createdById: actor.userId })
       .returning();
     if (!client) throw new Error("Insert returned no row");
     // The creator can always see what they created.
-    await ensureAssignment(tx as unknown as Db, client.id, actor.userId);
+    await ensureAssignment(tx as unknown as Db, actor.firmId, client.id, actor.userId);
     await recordAudit(tx as unknown as Db, {
+      firmId: actor.firmId,
       actorUserId: actor.userId,
       action: "client.create",
       entityType: "client",
       entityId: client.id,
     });
     await recordAudit(tx as unknown as Db, {
+      firmId: actor.firmId,
       actorUserId: actor.userId,
       action: "client.assign",
       entityType: "client",
@@ -73,10 +75,11 @@ export async function updateClient(db: Db, actor: Actor, clientId: string, input
   const [updated] = await db
     .update(clients)
     .set({ ...next, updatedAt: new Date() })
-    .where(eq(clients.id, clientId))
+    .where(and(eq(clients.id, clientId), inFirm(clients.firmId, actor)))
     .returning();
   if (!updated) throw new NotFoundError();
   await recordAudit(db, {
+    firmId: actor.firmId,
     actorUserId: actor.userId,
     action: "client.update",
     entityType: "client",

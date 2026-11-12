@@ -2,7 +2,7 @@ import { and, desc, eq, ilike, isNotNull, isNull, lt, notInArray, or, sql } from
 import type { Db } from "@/db";
 import { clients, documents, engagements, leads, tasks } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
-import { requireStaff, visibleClientsCondition } from "./access";
+import { inFirm, requireStaff, visibleClientsCondition } from "./access";
 import { firmToday } from "./dashboard";
 import { countLeadsByStatus } from "./leads";
 import { countUnreadForStaff } from "./messages";
@@ -30,13 +30,23 @@ export async function getNotifications(db: Db, actor: Actor): Promise<Notificati
       .select({ n })
       .from(engagements)
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(visible, isNotNull(engagements.dueDate), lt(engagements.dueDate, today), notInArray(engagements.status, ["filed", "completed"]))),
+      .where(and(inFirm(engagements.firmId, actor), visible, isNotNull(engagements.dueDate), lt(engagements.dueDate, today), notInArray(engagements.status, ["filed", "completed"]))),
     db
       .select({ n })
       .from(tasks)
       .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(visible, eq(tasks.assigneeId, actor.userId), eq(tasks.status, "open"), isNotNull(tasks.dueDate), sql`${tasks.dueDate} <= ${today}`)),
+      .where(
+        and(
+          inFirm(tasks.firmId, actor),
+          inFirm(engagements.firmId, actor),
+          visible,
+          eq(tasks.assigneeId, actor.userId),
+          eq(tasks.status, "open"),
+          isNotNull(tasks.dueDate),
+          sql`${tasks.dueDate} <= ${today}`,
+        ),
+      ),
   ]);
   const items: NotificationItem[] = [
     { id: "overdue", label: "Overdue engagements", detail: "Past their due date", count: overdue[0]?.n ?? 0, href: "/staff/engagements", tone: "danger" },
@@ -72,19 +82,19 @@ export async function globalSearch(db: Db, actor: Actor, raw: string): Promise<S
       .select({ id: engagements.id, title: engagements.title, clientName: clients.displayName })
       .from(engagements)
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(visible, or(ilike(engagements.title, like), ilike(clients.displayName, like))))
+      .where(and(inFirm(engagements.firmId, actor), visible, or(ilike(engagements.title, like), ilike(clients.displayName, like))))
       .orderBy(desc(engagements.updatedAt))
       .limit(8),
     db
       .select({ id: leads.id, name: leads.name, email: leads.email, company: leads.company })
       .from(leads)
-      .where(or(ilike(leads.name, like), ilike(leads.email, like), ilike(leads.company, like)))
+      .where(and(inFirm(leads.firmId, actor), or(ilike(leads.name, like), ilike(leads.email, like), ilike(leads.company, like))))
       .limit(8),
     db
       .select({ id: documents.id, fileName: documents.fileName, clientName: clients.displayName })
       .from(documents)
       .innerJoin(clients, eq(clients.id, documents.clientId))
-      .where(and(visible, isNull(documents.deletedAt), ilike(documents.fileName, like)))
+      .where(and(inFirm(documents.firmId, actor), visible, isNull(documents.deletedAt), ilike(documents.fileName, like)))
       .orderBy(desc(documents.createdAt))
       .limit(8),
   ]);

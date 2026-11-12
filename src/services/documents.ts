@@ -8,7 +8,7 @@ import { checkFile } from "@/lib/file-rules";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { databaseStorage, noScanner, type FileStorage, type MalwareScanner } from "@/lib/storage";
 import { isUuid } from "@/lib/validation";
-import { assertClientAccess, visibleClientsCondition } from "./access";
+import { assertClientAccess, inFirm, visibleClientsCondition } from "./access";
 import { recordAudit } from "./audit";
 
 export interface DocumentDeps {
@@ -39,7 +39,7 @@ async function resolveUploadTarget(db: Db, actor: Actor, clientId: string, engag
   }
   if (engagementId) {
     if (!isUuid(engagementId)) throw new ValidationError({ engagementId: ["Choose a valid engagement."] });
-    const [e] = await db.select({ clientId: engagements.clientId }).from(engagements).where(eq(engagements.id, engagementId));
+    const [e] = await db.select({ clientId: engagements.clientId }).from(engagements).where(and(eq(engagements.id, engagementId), inFirm(engagements.firmId, actor)));
     if (!e || e.clientId !== clientId) throw new ValidationError({ engagementId: ["That engagement belongs to a different client."] });
   }
 }
@@ -56,7 +56,7 @@ export async function uploadDocument(
   const { fileName, contentType } = checkFile(input.fileName, input.data);
   const scanStatus = await scanner.scan(input.data, fileName);
   if (scanStatus === "infected") {
-    await recordAudit(db, { actorUserId: actor.userId, action: "document.rejected_malware", entityType: "client", entityId: input.clientId });
+    await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "document.rejected_malware", entityType: "client", entityId: input.clientId });
     throw new ValidationError({ file: ["This file was flagged as unsafe and was not uploaded."] });
   }
 
@@ -66,6 +66,7 @@ export async function uploadDocument(
   const [doc] = await db
     .insert(documents)
     .values({
+      firmId: actor.firmId,
       clientId: input.clientId,
       engagementId: input.engagementId ?? null,
       fileName,
@@ -81,6 +82,7 @@ export async function uploadDocument(
     })
     .returning();
   await recordAudit(db, {
+    firmId: actor.firmId,
     actorUserId: actor.userId,
     action: "document.upload",
     entityType: "document",
@@ -108,14 +110,14 @@ function listQuery(db: Db) {
       createdAt: documents.createdAt,
     })
     .from(documents)
-    .leftJoin(engagements, eq(engagements.id, documents.engagementId))
-    .leftJoin(uploader, eq(uploader.id, documents.uploadedById));
+    .leftJoin(engagements, and(eq(engagements.id, documents.engagementId), eq(engagements.firmId, documents.firmId)))
+    .leftJoin(uploader, and(eq(uploader.id, documents.uploadedById), eq(uploader.firmId, documents.firmId)));
 }
 
 export async function listClientDocuments(db: Db, actor: Actor, clientId: string): Promise<DocumentListItem[]> {
   await assertClientAccess(db, actor, clientId);
   return listQuery(db)
-    .where(and(eq(documents.clientId, clientId), isNull(documents.deletedAt)))
+    .where(and(inFirm(documents.firmId, actor), eq(documents.clientId, clientId), isNull(documents.deletedAt)))
     .orderBy(desc(documents.createdAt));
 }
 
@@ -140,9 +142,9 @@ export async function listRecentDocuments(db: Db, actor: Actor, limit = 100): Pr
     })
     .from(documents)
     .innerJoin(clients, eq(clients.id, documents.clientId))
-    .leftJoin(engagements, eq(engagements.id, documents.engagementId))
-    .leftJoin(uploader, eq(uploader.id, documents.uploadedById))
-    .where(and(visible, isNull(documents.deletedAt)))
+    .leftJoin(engagements, and(eq(engagements.id, documents.engagementId), eq(engagements.firmId, documents.firmId)))
+    .leftJoin(uploader, and(eq(uploader.id, documents.uploadedById), eq(uploader.firmId, documents.firmId)))
+    .where(and(inFirm(documents.firmId, actor), visible, isNull(documents.deletedAt)))
     .orderBy(desc(documents.createdAt))
     .limit(Math.min(limit, 300));
   return rows;
@@ -152,13 +154,13 @@ export async function listRecentDocuments(db: Db, actor: Actor, limit = 100): Pr
 export async function listPortalDocuments(db: Db, actor: Actor): Promise<DocumentListItem[]> {
   if (actor.role !== "client" || !actor.clientId) throw new ForbiddenError();
   return listQuery(db)
-    .where(and(eq(documents.clientId, actor.clientId), eq(documents.visibleToClient, true), isNull(documents.deletedAt)))
+    .where(and(inFirm(documents.firmId, actor), eq(documents.clientId, actor.clientId), eq(documents.visibleToClient, true), isNull(documents.deletedAt)))
     .orderBy(desc(documents.createdAt));
 }
 
 async function loadAccessibleDocument(db: Db, actor: Actor, id: string): Promise<DocumentRow> {
   if (!isUuid(id)) throw new NotFoundError();
-  const [doc] = await db.select().from(documents).where(and(eq(documents.id, id), isNull(documents.deletedAt)));
+  const [doc] = await db.select().from(documents).where(and(eq(documents.id, id), inFirm(documents.firmId, actor), isNull(documents.deletedAt)));
   if (!doc) throw new NotFoundError();
   if (actor.role === "client") {
     if (!actor.clientId || doc.clientId !== actor.clientId || !doc.visibleToClient) throw new NotFoundError();
@@ -178,7 +180,7 @@ export async function getDocumentForDownload(
   if (doc.scanStatus === "infected") throw new NotFoundError();
   const data = await (deps.storage ?? databaseStorage(db)).get(doc.storageKey);
   if (!data) throw new NotFoundError();
-  await recordAudit(db, { actorUserId: actor.userId, action: "document.download", entityType: "document", entityId: doc.id });
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "document.download", entityType: "document", entityId: doc.id });
   return { doc, data };
 }
 
@@ -186,14 +188,14 @@ export async function setDocumentShared(db: Db, actor: Actor, id: string, shared
   if (actor.role === "client") throw new ForbiddenError();
   const doc = await loadAccessibleDocument(db, actor, id);
   if (doc.uploadedByClient && !shared) throw new ValidationError({ _form: ["Files the client uploaded always stay visible to them."] });
-  await db.update(documents).set({ visibleToClient: shared }).where(eq(documents.id, id));
-  await recordAudit(db, { actorUserId: actor.userId, action: shared ? "document.share" : "document.unshare", entityType: "document", entityId: id });
+  await db.update(documents).set({ visibleToClient: shared }).where(and(eq(documents.id, id), inFirm(documents.firmId, actor)));
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: shared ? "document.share" : "document.unshare", entityType: "document", entityId: id });
 }
 
 /** Removes a document from view. The stored bytes are retained per the firm's retention policy. */
 export async function archiveDocument(db: Db, actor: Actor, id: string): Promise<void> {
   if (actor.role === "client") throw new ForbiddenError();
   await loadAccessibleDocument(db, actor, id);
-  await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, id));
-  await recordAudit(db, { actorUserId: actor.userId, action: "document.archive", entityType: "document", entityId: id });
+  await db.update(documents).set({ deletedAt: new Date() }).where(and(eq(documents.id, id), inFirm(documents.firmId, actor)));
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "document.archive", entityType: "document", entityId: id });
 }

@@ -5,6 +5,7 @@ import type { Actor } from "@/lib/auth/actor";
 import { invalidateUserSessions } from "@/lib/auth/sessions";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { isUuid, parseInput, staffInviteSchema, staffRoleSchema } from "@/lib/validation";
+import { inFirm } from "./access";
 import { recordAudit } from "./audit";
 import { createStaffInvitation, findUserByEmail, issueInvitation } from "./users";
 
@@ -37,7 +38,7 @@ export async function listTeam(db: Db, actor: Actor): Promise<TeamMember[]> {
       createdAt: users.createdAt,
     })
     .from(users)
-    .where(ne(users.role, "client"))
+    .where(and(inFirm(users.firmId, actor), ne(users.role, "client")))
     .orderBy(asc(users.name));
   return rows as TeamMember[];
 }
@@ -49,22 +50,22 @@ export async function inviteStaff(db: Db, actor: Actor, input: unknown): Promise
   if (await findUserByEmail(db, data.email)) {
     throw new ValidationError({ email: ["Someone already has an account with this email. Use “New sign-in link” on their row instead."] });
   }
-  return createStaffInvitation(db, data, actor);
+  return createStaffInvitation(db, actor.firmId, data, actor);
 }
 
 async function loadStaffTarget(db: Db, actor: Actor, userId: string) {
   requireAdmin(actor);
   if (!isUuid(userId)) throw new NotFoundError();
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  const [user] = await db.select().from(users).where(and(eq(users.id, userId), inFirm(users.firmId, actor))).limit(1);
   if (!user || user.role === "client") throw new NotFoundError();
   return user;
 }
 
-async function otherActiveAdmins(db: Db, excludeUserId: string): Promise<number> {
+async function otherActiveAdmins(db: Db, firmId: string, excludeUserId: string): Promise<number> {
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(users)
-    .where(and(eq(users.role, "admin"), eq(users.isActive, true), ne(users.id, excludeUserId)));
+    .where(and(eq(users.firmId, firmId), eq(users.role, "admin"), eq(users.isActive, true), ne(users.id, excludeUserId)));
   return row?.n ?? 0;
 }
 
@@ -73,20 +74,21 @@ export async function sendStaffSignInLink(db: Db, actor: Actor, userId: string):
   const user = await loadStaffTarget(db, actor, userId);
   if (!user.isActive) throw new ValidationError({ _form: ["Reactivate this account before sending a sign-in link."] });
   const token = await issueInvitation(db, user.id, actor.userId);
-  await recordAudit(db, { actorUserId: actor.userId, action: "staff.signin_link", entityType: "user", entityId: user.id });
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "staff.signin_link", entityType: "user", entityId: user.id });
   return { token };
 }
 
 export async function setStaffActive(db: Db, actor: Actor, userId: string, active: boolean): Promise<void> {
   const user = await loadStaffTarget(db, actor, userId);
   if (user.id === actor.userId) throw new ValidationError({ _form: ["You can’t deactivate your own account."] });
-  if (!active && user.role === "admin" && (await otherActiveAdmins(db, user.id)) === 0) {
+  if (!active && user.role === "admin" && (await otherActiveAdmins(db, actor.firmId, user.id)) === 0) {
     throw new ValidationError({ _form: ["The firm needs at least one active admin."] });
   }
   if (user.isActive === active) return;
-  await db.update(users).set({ isActive: active, updatedAt: new Date() }).where(eq(users.id, user.id));
+  await db.update(users).set({ isActive: active, updatedAt: new Date() }).where(and(eq(users.id, user.id), inFirm(users.firmId, actor)));
   if (!active) await invalidateUserSessions(db, user.id);
   await recordAudit(db, {
+    firmId: actor.firmId,
     actorUserId: actor.userId,
     action: active ? "staff.reactivate" : "staff.deactivate",
     entityType: "user",
@@ -99,13 +101,14 @@ export async function changeStaffRole(db: Db, actor: Actor, userId: string, role
   const next = parseInput(staffRoleSchema, role);
   if (user.id === actor.userId) throw new ValidationError({ _form: ["You can’t change your own role."] });
   if (user.role === next) return;
-  if (user.role === "admin" && user.isActive && (await otherActiveAdmins(db, user.id)) === 0) {
+  if (user.role === "admin" && user.isActive && (await otherActiveAdmins(db, actor.firmId, user.id)) === 0) {
     throw new ValidationError({ _form: ["The firm needs at least one active admin."] });
   }
-  await db.update(users).set({ role: next, updatedAt: new Date() }).where(eq(users.id, user.id));
+  await db.update(users).set({ role: next, updatedAt: new Date() }).where(and(eq(users.id, user.id), inFirm(users.firmId, actor)));
   // Permissions change immediately: force a fresh sign-in.
   await invalidateUserSessions(db, user.id);
   await recordAudit(db, {
+    firmId: actor.firmId,
     actorUserId: actor.userId,
     action: "staff.role_change",
     entityType: "user",

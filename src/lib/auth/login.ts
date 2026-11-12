@@ -4,7 +4,7 @@ import type { Db } from "@/db";
 import { users } from "@/db/schema";
 import { AuthenticationError } from "@/lib/errors";
 import { recordAudit } from "@/services/audit";
-import type { Actor } from "./actor";
+import { actorFromUser, type Actor } from "./actor";
 import { PASSWORD_MAX_LENGTH, verifyAgainstDummy, verifyPassword } from "./crypto";
 import { createSession, type NewSession } from "./sessions";
 
@@ -41,7 +41,7 @@ export async function login(
 
   if (user.lockedUntil && user.lockedUntil.getTime() > now.getTime()) {
     await verifyAgainstDummy(password);
-    await recordAudit(db, { actorUserId: user.id, action: "auth.login_blocked_locked", entityType: "user", entityId: user.id });
+    await recordAudit(db, { firmId: user.firmId, actorUserId: user.id, action: "auth.login_blocked_locked", entityType: "user", entityId: user.id });
     throw new AuthenticationError(LOGIN_FAILED_MESSAGE);
   }
 
@@ -56,6 +56,7 @@ export async function login(
       })
       .where(eq(users.id, user.id));
     await recordAudit(db, {
+      firmId: user.firmId,
       actorUserId: user.id,
       action: lock ? "auth.account_locked" : "auth.login_failed",
       entityType: "user",
@@ -66,10 +67,10 @@ export async function login(
 
   await db.update(users).set({ failedLoginCount: 0, lockedUntil: null }).where(eq(users.id, user.id));
   const session = await createSession(db, user.id, now);
-  await recordAudit(db, { actorUserId: user.id, action: "auth.login", entityType: "user", entityId: user.id });
+  await recordAudit(db, { firmId: user.firmId, actorUserId: user.id, action: "auth.login", entityType: "user", entityId: user.id });
 
   return {
     ...session,
-    actor: { userId: user.id, role: user.role, clientId: user.clientId, name: user.name, email: user.email },
+    actor: actorFromUser(user),
   };
 }

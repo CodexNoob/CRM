@@ -6,7 +6,7 @@ import type { Actor } from "@/lib/auth/actor";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 import { engagementInputSchema, isUuid, parseInput, taskInputSchema } from "@/lib/validation";
 import { recordAudit } from "./audit";
-import { assertActiveStaffUser, assertClientAccess, ensureAssignment, requireCanAssign, requireStaff, visibleClientsCondition } from "./access";
+import { assertActiveStaffUser, assertClientAccess, ensureAssignment, inFirm, requireCanAssign, requireStaff, visibleClientsCondition } from "./access";
 
 const CLOSED_STATUSES: EngagementStatus[] = ["completed"];
 
@@ -36,7 +36,7 @@ function summarySelect() {
     clientId: engagements.clientId,
     clientName: clients.displayName,
     ownerName: owner.name,
-    openTaskCount: sql<number>`(select count(*)::int from ${tasks} where ${tasks.engagementId} = ${engagements.id} and ${tasks.status} = 'open')`,
+    openTaskCount: sql<number>`(select count(*)::int from ${tasks} where ${tasks.engagementId} = ${engagements.id} and ${tasks.firmId} = ${engagements.firmId} and ${tasks.status} = 'open')`,
   };
 }
 
@@ -54,6 +54,7 @@ export async function listOpenEngagements(
     .innerJoin(owner, eq(owner.id, engagements.ownerId))
     .where(
       and(
+        inFirm(engagements.firmId, actor),
         visible,
         notInArray(engagements.status, CLOSED_STATUSES),
         opts.ownedByMe ? eq(engagements.ownerId, actor.userId) : undefined,
@@ -70,7 +71,7 @@ export async function listClientEngagements(db: Db, actor: Actor, clientId: stri
     .from(engagements)
     .innerJoin(clients, eq(clients.id, engagements.clientId))
     .innerJoin(owner, eq(owner.id, engagements.ownerId))
-    .where(eq(engagements.clientId, clientId))
+    .where(and(inFirm(engagements.firmId, actor), eq(engagements.clientId, clientId)))
     .orderBy(desc(engagements.createdAt));
 }
 
@@ -84,7 +85,7 @@ export interface EngagementDetail {
 async function loadEngagementForStaff(db: Db, actor: Actor, engagementId: string): Promise<Engagement> {
   requireStaff(actor);
   if (!isUuid(engagementId)) throw new NotFoundError();
-  const [engagement] = await db.select().from(engagements).where(eq(engagements.id, engagementId)).limit(1);
+  const [engagement] = await db.select().from(engagements).where(and(eq(engagements.id, engagementId), inFirm(engagements.firmId, actor))).limit(1);
   if (!engagement) throw new NotFoundError();
   await assertClientAccess(db, actor, engagement.clientId);
   return engagement;
@@ -96,13 +97,13 @@ export async function getEngagement(db: Db, actor: Actor, engagementId: string):
     .select({ clientName: clients.displayName, ownerName: owner.name })
     .from(clients)
     .innerJoin(owner, eq(owner.id, engagement.ownerId))
-    .where(eq(clients.id, engagement.clientId));
+    .where(and(eq(clients.id, engagement.clientId), inFirm(clients.firmId, actor)));
   const assignee = alias(users, "assignee");
   const taskRows = await db
     .select({ task: tasks, assigneeName: assignee.name })
     .from(tasks)
     .leftJoin(assignee, eq(assignee.id, tasks.assigneeId))
-    .where(eq(tasks.engagementId, engagement.id))
+    .where(and(eq(tasks.engagementId, engagement.id), inFirm(tasks.firmId, actor)))
     .orderBy(asc(tasks.status), sql`${tasks.dueDate} asc nulls last`, asc(tasks.createdAt));
   return {
     engagement,
@@ -116,17 +117,18 @@ export async function createEngagement(db: Db, actor: Actor, clientId: string, i
   await assertClientAccess(db, actor, clientId);
   const data = parseInput(engagementInputSchema, input);
   requireCanAssign(actor, data.ownerId);
-  await assertActiveStaffUser(db, data.ownerId, "ownerId");
+  await assertActiveStaffUser(db, actor, data.ownerId, "ownerId");
   return db.transaction(async (tx) => {
     const t = tx as unknown as Db;
     const [engagement] = await t
       .insert(engagements)
-      .values({ ...data, taxYear: data.taxYear ?? null, dueDate: data.dueDate ?? null, clientId })
+      .values({ ...data, firmId: actor.firmId, taxYear: data.taxYear ?? null, dueDate: data.dueDate ?? null, clientId })
       .returning();
     if (!engagement) throw new Error("Insert returned no row");
     // The owner must be able to see the client they are responsible for.
-    await ensureAssignment(t, clientId, data.ownerId);
+    await ensureAssignment(t, actor.firmId, clientId, data.ownerId);
     await recordAudit(t, {
+      firmId: actor.firmId,
       actorUserId: actor.userId,
       action: "engagement.create",
       entityType: "engagement",
@@ -134,6 +136,7 @@ export async function createEngagement(db: Db, actor: Actor, clientId: string, i
       metadata: { clientId },
     });
     await recordAudit(t, {
+      firmId: actor.firmId,
       actorUserId: actor.userId,
       action: "client.assign",
       entityType: "client",
@@ -149,7 +152,7 @@ export async function updateEngagement(db: Db, actor: Actor, engagementId: strin
   const data = parseInput(engagementInputSchema, input);
   if (data.ownerId !== existing.ownerId) {
     requireCanAssign(actor, data.ownerId);
-    await assertActiveStaffUser(db, data.ownerId, "ownerId");
+    await assertActiveStaffUser(db, actor, data.ownerId, "ownerId");
   }
   const next = { ...data, taxYear: data.taxYear ?? null, dueDate: data.dueDate ?? null };
   const changed = (Object.keys(next) as (keyof typeof next)[]).filter((k) => next[k] !== existing[k]);
@@ -160,11 +163,12 @@ export async function updateEngagement(db: Db, actor: Actor, engagementId: strin
     const [updated] = await t
       .update(engagements)
       .set({ ...next, updatedAt: new Date() })
-      .where(eq(engagements.id, engagementId))
+      .where(and(eq(engagements.id, engagementId), inFirm(engagements.firmId, actor)))
       .returning();
     if (!updated) throw new NotFoundError();
-    if (changed.includes("ownerId")) await ensureAssignment(t, existing.clientId, data.ownerId);
+    if (changed.includes("ownerId")) await ensureAssignment(t, actor.firmId, existing.clientId, data.ownerId);
     await recordAudit(t, {
+      firmId: actor.firmId,
       actorUserId: actor.userId,
       action: "engagement.update",
       entityType: "engagement",
@@ -173,6 +177,7 @@ export async function updateEngagement(db: Db, actor: Actor, engagementId: strin
     });
     if (changed.includes("ownerId")) {
       await recordAudit(t, {
+        firmId: actor.firmId,
         actorUserId: actor.userId,
         action: "client.assign",
         entityType: "client",
@@ -189,8 +194,9 @@ export async function setEngagementStatus(db: Db, actor: Actor, engagementId: st
   const existing = await loadEngagementForStaff(db, actor, engagementId);
   if (!engagements.status.enumValues.includes(status)) throw new ValidationError({ status: ["Choose a status."] });
   if (existing.status === status) return;
-  await db.update(engagements).set({ status, updatedAt: new Date() }).where(eq(engagements.id, engagementId));
+  await db.update(engagements).set({ status, updatedAt: new Date() }).where(and(eq(engagements.id, engagementId), inFirm(engagements.firmId, actor)));
   await recordAudit(db, {
+    firmId: actor.firmId,
     actorUserId: actor.userId,
     action: "engagement.update",
     entityType: "engagement",
@@ -208,13 +214,14 @@ export async function createTask(db: Db, actor: Actor, engagementId: string, inp
   }
   if (data.assigneeId) {
     requireCanAssign(actor, data.assigneeId);
-    await assertActiveStaffUser(db, data.assigneeId, "assigneeId");
+    await assertActiveStaffUser(db, actor, data.assigneeId, "assigneeId");
     // The assignee must be able to open the engagement their task belongs to.
-    await ensureAssignment(db, engagement.clientId, data.assigneeId);
+    await ensureAssignment(db, actor.firmId, engagement.clientId, data.assigneeId);
   }
   const [task] = await db
     .insert(tasks)
     .values({
+      firmId: actor.firmId,
       engagementId: engagement.id,
       title: data.title,
       isClientTask: data.isClientTask,
@@ -224,6 +231,7 @@ export async function createTask(db: Db, actor: Actor, engagementId: string, inp
     .returning();
   if (!task) throw new Error("Insert returned no row");
   await recordAudit(db, {
+    firmId: actor.firmId,
     actorUserId: actor.userId,
     action: "task.create",
     entityType: "task",
@@ -232,6 +240,7 @@ export async function createTask(db: Db, actor: Actor, engagementId: string, inp
   });
   if (data.assigneeId) {
     await recordAudit(db, {
+      firmId: actor.firmId,
       actorUserId: actor.userId,
       action: "task.assign",
       entityType: "task",
@@ -253,7 +262,7 @@ export async function setTaskStatus(db: Db, actor: Actor, taskId: string, status
     .select({ task: tasks, clientId: engagements.clientId })
     .from(tasks)
     .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
-    .where(eq(tasks.id, taskId))
+    .where(and(eq(tasks.id, taskId), inFirm(tasks.firmId, actor), inFirm(engagements.firmId, actor)))
     .limit(1);
   if (!row) throw new NotFoundError();
 
@@ -273,10 +282,11 @@ export async function setTaskStatus(db: Db, actor: Actor, taskId: string, status
       completedById: status === "done" ? actor.userId : null,
       updatedAt: new Date(),
     })
-    .where(eq(tasks.id, taskId))
+    .where(and(eq(tasks.id, taskId), inFirm(tasks.firmId, actor)))
     .returning();
   if (!updated) throw new NotFoundError();
   await recordAudit(db, {
+    firmId: actor.firmId,
     actorUserId: actor.userId,
     action: status === "done" ? "task.complete" : "task.reopen",
     entityType: "task",
@@ -291,6 +301,6 @@ export async function listStaff(db: Db, actor: Actor) {
   return db
     .select({ id: users.id, name: users.name, role: users.role })
     .from(users)
-    .where(and(eq(users.isActive, true), inArray(users.role, ["admin", "partner", "preparer"])))
+    .where(and(inFirm(users.firmId, actor), eq(users.isActive, true), inArray(users.role, ["admin", "partner", "preparer"])))
     .orderBy(asc(users.name));
 }

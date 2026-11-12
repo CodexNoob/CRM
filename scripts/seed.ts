@@ -9,6 +9,7 @@ import type { Actor } from "@/lib/auth/actor";
 import { createClient } from "@/services/clients";
 import { createEngagement, createTask } from "@/services/engagements";
 import { createPortalInvitation, createStaffInvitation } from "@/services/users";
+import { createFirm } from "@/services/firms";
 import { appUrl, openFromEnv } from "./env";
 
 const { url, handle } = openFromEnv();
@@ -29,11 +30,12 @@ try {
   const links: [string, string][] = [];
   const link = (token: string) => `${appUrl()}/setup-password?token=${encodeURIComponent(token)}`;
 
-  const adminInvite = await createStaffInvitation(db, { email: "admin@demo.test", name: "Avery Admin", role: "admin" }, null);
-  const prepInvite = await createStaffInvitation(db, { email: "preparer@demo.test", name: "Parker Preparer", role: "preparer" }, null);
+  const firm = await createFirm(db, { name: "Demo Tax & Accounting", status: "active" });
+  const adminInvite = await createStaffInvitation(db, firm.id, { email: "admin@demo.test", name: "Avery Admin", role: "admin" }, null);
+  const prepInvite = await createStaffInvitation(db, firm.id, { email: "preparer@demo.test", name: "Parker Preparer", role: "preparer" }, null);
   links.push(["admin@demo.test (firm admin)", link(adminInvite.token)], ["preparer@demo.test (preparer)", link(prepInvite.token)]);
 
-  const admin: Actor = { userId: adminInvite.userId, role: "admin", clientId: null, name: "Avery Admin", email: "admin@demo.test" };
+  const admin: Actor = { userId: adminInvite.userId, firmId: firm.id, role: "admin", clientId: null, name: "Avery Admin", email: "admin@demo.test" };
 
   const jordan = await createClient(db, admin, { type: "individual", displayName: "Jordan Sample", email: "jordan@demo.test", phone: "555-010-1000" });
   const rivera = await createClient(db, admin, { type: "household", displayName: "Rivera Household (demo)", email: "rivera@demo.test" });

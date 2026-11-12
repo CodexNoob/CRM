@@ -5,7 +5,7 @@ import { leads, users, type Lead, type LeadStatus } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
 import { AppError, NotFoundError, ValidationError } from "@/lib/errors";
 import { isUuid, leadInputSchema, leadUpdateSchema, parseInput, websiteInquirySchema } from "@/lib/validation";
-import { assertActiveStaffUser, requireStaff } from "./access";
+import { assertActiveStaffUser, inFirm, requireStaff } from "./access";
 import { recordAudit } from "./audit";
 import { createClient } from "./clients";
 
@@ -36,7 +36,7 @@ export async function listLeads(db: Db, actor: Actor, opts: { status?: LeadStatu
     .select({ lead: leads, ownerName: owner.name })
     .from(leads)
     .leftJoin(owner, eq(owner.id, leads.ownerId))
-    .where(and(statusFilter, like ? or(ilike(leads.name, like), ilike(leads.email, like), ilike(leads.phone, like), ilike(leads.company, like)) : undefined))
+    .where(and(inFirm(leads.firmId, actor), statusFilter, like ? or(ilike(leads.name, like), ilike(leads.email, like), ilike(leads.phone, like), ilike(leads.company, like)) : undefined))
     .orderBy(desc(leads.createdAt))
     .limit(300);
   return rows.map((r) => ({ ...r.lead, ownerName: r.ownerName }));
@@ -45,14 +45,14 @@ export async function listLeads(db: Db, actor: Actor, opts: { status?: LeadStatu
 export async function getLead(db: Db, actor: Actor, id: string): Promise<LeadRow> {
   requireStaff(actor);
   if (!isUuid(id)) throw new NotFoundError();
-  const [row] = await db.select({ lead: leads, ownerName: owner.name }).from(leads).leftJoin(owner, eq(owner.id, leads.ownerId)).where(eq(leads.id, id));
+  const [row] = await db.select({ lead: leads, ownerName: owner.name }).from(leads).leftJoin(owner, eq(owner.id, leads.ownerId)).where(and(eq(leads.id, id), inFirm(leads.firmId, actor)));
   if (!row) throw new NotFoundError();
   return { ...row.lead, ownerName: row.ownerName };
 }
 
 export async function countLeadsByStatus(db: Db, actor: Actor): Promise<Record<LeadStatus, number>> {
   requireStaff(actor);
-  const rows = await db.select({ status: leads.status, n: sql<number>`count(*)::int` }).from(leads).groupBy(leads.status);
+  const rows = await db.select({ status: leads.status, n: sql<number>`count(*)::int` }).from(leads).where(inFirm(leads.firmId, actor)).groupBy(leads.status);
   const out = { new: 0, contacted: 0, qualified: 0, converted: 0, lost: 0 } as Record<LeadStatus, number>;
   for (const r of rows) out[r.status] = r.n;
   return out;
@@ -61,9 +61,9 @@ export async function countLeadsByStatus(db: Db, actor: Actor): Promise<Record<L
 export async function createLead(db: Db, actor: Actor, input: unknown): Promise<Lead> {
   requireStaff(actor);
   const data = parseInput(leadInputSchema, input);
-  const [lead] = await db.insert(leads).values({ ...data, ownerId: actor.userId }).returning();
+  const [lead] = await db.insert(leads).values({ ...data, firmId: actor.firmId, ownerId: actor.userId }).returning();
   if (!lead) throw new Error("Insert returned no row");
-  await recordAudit(db, { actorUserId: actor.userId, action: "lead.create", entityType: "lead", entityId: lead.id, metadata: { source: data.source } });
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "lead.create", entityType: "lead", entityId: lead.id, metadata: { source: data.source } });
   return lead;
 }
 
@@ -71,7 +71,7 @@ export async function updateLead(db: Db, actor: Actor, id: string, input: unknow
   const existing = await getLead(db, actor, id);
   if (existing.status === "converted") throw new ValidationError({ _form: ["This lead was converted to a client. Edit the client record instead."] });
   const data = parseInput(leadUpdateSchema, input);
-  if (data.ownerId) await assertActiveStaffUser(db, data.ownerId, "ownerId");
+  if (data.ownerId) await assertActiveStaffUser(db, actor, data.ownerId, "ownerId");
   const next = {
     name: data.name,
     email: data.email ?? null,
@@ -87,8 +87,8 @@ export async function updateLead(db: Db, actor: Actor, id: string, input: unknow
   };
   const changed = (Object.keys(next) as (keyof typeof next)[]).filter((k) => next[k] !== existing[k]);
   if (!changed.length) return existing;
-  const [updated] = await db.update(leads).set({ ...next, updatedAt: new Date() }).where(eq(leads.id, id)).returning();
-  await recordAudit(db, { actorUserId: actor.userId, action: "lead.update", entityType: "lead", entityId: id, metadata: { changedFields: changed } });
+  const [updated] = await db.update(leads).set({ ...next, updatedAt: new Date() }).where(and(eq(leads.id, id), inFirm(leads.firmId, actor))).returning();
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "lead.update", entityType: "lead", entityId: id, metadata: { changedFields: changed } });
   return updated!;
 }
 
@@ -98,8 +98,8 @@ export async function setLeadStatus(db: Db, actor: Actor, id: string, status: "n
   if (lead.status === "converted") throw new ValidationError({ _form: ["Converted leads can’t be changed."] });
   if (!["new", "contacted", "qualified", "lost"].includes(status)) throw new ValidationError({ status: ["Choose a status."] });
   if (lead.status === status) return;
-  await db.update(leads).set({ status, updatedAt: new Date() }).where(eq(leads.id, id));
-  await recordAudit(db, { actorUserId: actor.userId, action: "lead.update", entityType: "lead", entityId: id, metadata: { changedFields: ["status"] } });
+  await db.update(leads).set({ status, updatedAt: new Date() }).where(and(eq(leads.id, id), inFirm(leads.firmId, actor)));
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "lead.update", entityType: "lead", entityId: id, metadata: { changedFields: ["status"] } });
 }
 
 /** Turns a lead into a client record. Idempotent: a converted lead returns its client. */
@@ -116,8 +116,8 @@ export async function convertLead(db: Db, actor: Actor, id: string): Promise<{ c
   await db
     .update(leads)
     .set({ status: "converted", convertedClientId: client.id, updatedAt: new Date() })
-    .where(eq(leads.id, id));
-  await recordAudit(db, { actorUserId: actor.userId, action: "lead.convert", entityType: "lead", entityId: id, metadata: { clientId: client.id } });
+    .where(and(eq(leads.id, id), inFirm(leads.firmId, actor)));
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "lead.convert", entityType: "lead", entityId: id, metadata: { clientId: client.id } });
   return { clientId: client.id };
 }
 
@@ -136,9 +136,11 @@ export const INQUIRY_MAX_PER_EMAIL_PER_HOUR = 3;
  * Creates a lead from the public website. Anti-abuse: a hidden honeypot field,
  * a minimum fill time, and a per-email hourly cap (per-IP limiting is applied
  * by the caller). No account is created. The caller sends the staff alert email.
+ * `firmId` is the firm whose public page the form is on (there is no signed-in actor).
  */
 export async function submitWebsiteInquiry(
   db: Db,
+  firmId: string,
   input: Record<string, unknown>,
   now = new Date(),
 ): Promise<{ id: string; name: string; serviceInterest: string | null }> {
@@ -151,12 +153,13 @@ export async function submitWebsiteInquiry(
   const [recent] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(leads)
-    .where(and(eq(leads.email, data.email), eq(leads.source, "website"), gte(leads.createdAt, new Date(now.getTime() - 3600_000))));
+    .where(and(eq(leads.firmId, firmId), eq(leads.email, data.email), eq(leads.source, "website"), gte(leads.createdAt, new Date(now.getTime() - 3600_000))));
   if ((recent?.n ?? 0) >= INQUIRY_MAX_PER_EMAIL_PER_HOUR) throw new SpamRejectedError();
 
   const [lead] = await db
     .insert(leads)
     .values({
+      firmId,
       name: data.name,
       email: data.email,
       phone: data.phone ?? null,
@@ -167,6 +170,6 @@ export async function submitWebsiteInquiry(
       consentAt: now,
     })
     .returning({ id: leads.id });
-  await recordAudit(db, { actorUserId: null, action: "lead.website_inquiry", entityType: "lead", entityId: lead!.id });
+  await recordAudit(db, { firmId, actorUserId: null, action: "lead.website_inquiry", entityType: "lead", entityId: lead!.id });
   return { id: lead!.id, name: data.name, serviceInterest: data.serviceInterest ?? null };
 }

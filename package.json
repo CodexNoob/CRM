@@ -22,7 +22,8 @@
     "db:seed": "tsx scripts/seed.ts",
     "user:invite": "tsx scripts/invite-user.ts",
     "email:test": "tsx scripts/email-test.ts",
-    "paypal:test": "tsx scripts/paypal-test.ts"
+    "paypal:test": "tsx scripts/paypal-test.ts",
+    "firm:check": "tsx scripts/firm-check.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",

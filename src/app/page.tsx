@@ -9,6 +9,7 @@ import { InquiryForm } from "@/components/site/inquiry-form";
 import { EmailButton } from "@/components/site/email-button";
 import { CheckIcon, LockIcon, MailIcon, PhoneIcon, PinIcon, ServiceGlyph } from "@/components/site/icons";
 import { formatDate, PORTAL_STATUS } from "@/lib/labels";
+import { getDefaultFirm } from "@/services/firms";
 import { getWebsiteContent, type PublicFirmProfile } from "@/services/settings";
 
 /** Firm details and announcements come from the CRM (Settings). Cached for 5 minutes and refreshed on save. */
@@ -21,7 +22,11 @@ const FALLBACK = {
 
 const loadContent = cache(async () => {
   try {
-    return await getWebsiteContent(getDb());
+    // The home page belongs to the default firm until per-firm public pages exist.
+    const db = getDb();
+    const firm = await getDefaultFirm(db);
+    if (!firm) return FALLBACK;
+    return await getWebsiteContent(db, firm.id);
   } catch (error) {
     // The public site must stay up even if the database is briefly unreachable.
     console.error("Website content fell back to defaults", { name: (error as Error)?.name });

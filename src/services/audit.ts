@@ -5,6 +5,8 @@ import type { Actor } from "@/lib/auth/actor";
 import { ForbiddenError } from "@/lib/errors";
 
 export interface AuditInput {
+  /** The firm the event belongs to (required; null only for platform-level events). */
+  firmId: string | null;
   actorUserId: string | null;
   action: string;
   entityType: string;
@@ -15,6 +17,7 @@ export interface AuditInput {
 
 export async function recordAudit(db: Db, event: AuditInput): Promise<void> {
   await db.insert(auditEvents).values({
+    firmId: event.firmId,
     actorUserId: event.actorUserId,
     action: event.action,
     entityType: event.entityType,
@@ -47,6 +50,7 @@ export async function listRecentActivity(db: Db, actor: Actor, opts: { limit?: n
     })
     .from(auditEvents)
     .leftJoin(users, eq(users.id, auditEvents.actorUserId))
+    .where(eq(auditEvents.firmId, actor.firmId))
     .orderBy(desc(auditEvents.createdAt))
     .limit(limit);
 }
@@ -57,7 +61,7 @@ export async function listAuditEvents(db: Db, actor: Actor, entityType: string, 
   return db
     .select()
     .from(auditEvents)
-    .where(and(eq(auditEvents.entityType, entityType), eq(auditEvents.entityId, entityId)))
+    .where(and(eq(auditEvents.firmId, actor.firmId), eq(auditEvents.entityType, entityType), eq(auditEvents.entityId, entityId)))
     .orderBy(desc(auditEvents.createdAt))
     .limit(200);
 }

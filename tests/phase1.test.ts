@@ -51,23 +51,23 @@ describe("leads", () => {
   });
 
   it("creates a lead from the website form with consent recorded", async () => {
-    const { id } = await submitWebsiteInquiry(h.db, form());
+    const { id } = await submitWebsiteInquiry(h.db, admin.firmId, form());
     const [lead] = await h.db.select().from(leads).where(eq(leads.id, id));
     expect(lead).toMatchObject({ source: "website", status: "new", email: "prospect@example.test" });
     expect(lead!.consentAt).toBeInstanceOf(Date);
   });
 
   it("rejects bots: honeypot, too-fast submissions, and floods", async () => {
-    await expect(submitWebsiteInquiry(h.db, form({ website: "http://spam" }))).rejects.toBeInstanceOf(SpamRejectedError);
-    await expect(submitWebsiteInquiry(h.db, form({ startedAt: String(Date.now()) }))).rejects.toBeInstanceOf(SpamRejectedError);
-    await expect(submitWebsiteInquiry(h.db, form({ startedAt: "nope" }))).rejects.toBeInstanceOf(SpamRejectedError);
+    await expect(submitWebsiteInquiry(h.db, admin.firmId, form({ website: "http://spam" }))).rejects.toBeInstanceOf(SpamRejectedError);
+    await expect(submitWebsiteInquiry(h.db, admin.firmId, form({ startedAt: String(Date.now()) }))).rejects.toBeInstanceOf(SpamRejectedError);
+    await expect(submitWebsiteInquiry(h.db, admin.firmId, form({ startedAt: "nope" }))).rejects.toBeInstanceOf(SpamRejectedError);
     const email = "flood@example.test";
-    for (let i = 0; i < 3; i++) await submitWebsiteInquiry(h.db, form({ email }));
-    await expect(submitWebsiteInquiry(h.db, form({ email }))).rejects.toBeInstanceOf(SpamRejectedError);
+    for (let i = 0; i < 3; i++) await submitWebsiteInquiry(h.db, admin.firmId, form({ email }));
+    await expect(submitWebsiteInquiry(h.db, admin.firmId, form({ email }))).rejects.toBeInstanceOf(SpamRejectedError);
   });
 
   it("requires consent and a valid email", async () => {
-    const err = await submitWebsiteInquiry(h.db, form({ consent: undefined, email: "bad" })).catch((e) => e);
+    const err = await submitWebsiteInquiry(h.db, admin.firmId, form({ consent: undefined, email: "bad" })).catch((e) => e);
     expect(Object.keys((err as ValidationError).fieldErrors).sort()).toEqual(["consent", "email"]);
   });
 

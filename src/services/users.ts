@@ -7,7 +7,7 @@ import { invalidateUserSessions } from "@/lib/auth/sessions";
 import { AppError, ForbiddenError, ValidationError } from "@/lib/errors";
 import { parseInput, passwordSchema, portalInviteSchema } from "@/lib/validation";
 import { recordAudit } from "./audit";
-import { assertClientAccess } from "./access";
+import { assertClientAccess, inFirm } from "./access";
 
 export const INVITATION_TTL_MS = 72 * 60 * 60 * 1000;
 
@@ -52,7 +52,8 @@ export async function createPortalInvitation(
   await assertClientAccess(db, actor, clientId);
   const data = parseInput(portalInviteSchema, input);
   const existing = await findUserByEmail(db, data.email);
-  if (existing && (existing.role !== "client" || existing.clientId !== clientId)) {
+  // Emails are unique across the whole service; the message never says which firm uses it.
+  if (existing && (existing.firmId !== actor.firmId || existing.role !== "client" || existing.clientId !== clientId)) {
     throw new ValidationError({ email: ["This email is already used by another account."] });
   }
   if (existing && !existing.isActive) {
@@ -65,13 +66,14 @@ export async function createPortalInvitation(
     if (!userId) {
       const [created] = await t
         .insert(users)
-        .values({ email: data.email, name: data.name, role: "client", clientId })
+        .values({ firmId: actor.firmId, email: data.email, name: data.name, role: "client", clientId })
         .returning({ id: users.id });
       if (!created) throw new Error("Insert returned no row");
       userId = created.id;
     }
     const token = await issueInvitation(t, userId, actor.userId);
     await recordAudit(t, {
+      firmId: actor.firmId,
       actorUserId: actor.userId,
       action: "portal.invite",
       entityType: "user",
@@ -82,15 +84,23 @@ export async function createPortalInvitation(
   });
 }
 
-/** Creates a staff user and invitation. Used by the admin CLI (no web UI yet). */
+/**
+ * Creates a staff user of `firmId` and an invitation. Used by Team (admin) and the admin CLI
+ * (actor = null). An actor may only invite into their own firm.
+ */
 export async function createStaffInvitation(
   db: Db,
+  firmId: string,
   input: { email: string; name: string; role: StaffRole },
   actor: Actor | null,
 ): Promise<{ token: string; userId: string }> {
-  if (actor && actor.role !== "admin") throw new ForbiddenError();
+  if (actor && (actor.role !== "admin" || actor.firmId !== firmId)) throw new ForbiddenError();
   const email = input.email.trim().toLowerCase();
   const existing = await findUserByEmail(db, email);
+  // Emails are unique across the whole service; don't reveal which firm (if any other) uses it.
+  if (existing && existing.firmId !== firmId) {
+    throw new ValidationError({ email: ["This email is already used by another account."] });
+  }
   if (existing && existing.role === "client") {
     throw new ValidationError({ email: ["This email belongs to a client portal login."] });
   }
@@ -100,13 +110,14 @@ export async function createStaffInvitation(
     if (!userId) {
       const [created] = await t
         .insert(users)
-        .values({ email, name: input.name.trim(), role: input.role })
+        .values({ firmId, email, name: input.name.trim(), role: input.role })
         .returning({ id: users.id });
       if (!created) throw new Error("Insert returned no row");
       userId = created.id;
     }
     const token = await issueInvitation(t, userId, actor?.userId ?? null);
     await recordAudit(t, {
+      firmId,
       actorUserId: actor?.userId ?? null,
       action: "staff.invite",
       entityType: "user",
@@ -122,7 +133,7 @@ export async function acceptInvitation(db: Db, token: string, password: unknown,
   if (typeof token !== "string" || token.length < 20 || token.length > 200) throw new InvalidInvitationError();
   const pw = parseInput(passwordSchema.transform((p) => p), password);
   const [invite] = await db
-    .select({ invite: invitations, isActive: users.isActive })
+    .select({ invite: invitations, isActive: users.isActive, firmId: users.firmId })
     .from(invitations)
     .innerJoin(users, eq(users.id, invitations.userId))
     .where(eq(invitations.id, hashToken(token)))
@@ -145,6 +156,7 @@ export async function acceptInvitation(db: Db, token: string, password: unknown,
       .set({ passwordHash, failedLoginCount: 0, lockedUntil: null, updatedAt: now })
       .where(eq(users.id, invite.invite.userId));
     await recordAudit(t, {
+      firmId: invite.firmId,
       actorUserId: invite.invite.userId,
       action: "auth.password_set",
       entityType: "user",
@@ -165,5 +177,5 @@ export async function listPortalUsers(db: Db, actor: Actor, clientId: string) {
       hasPassword: sql<boolean>`${users.passwordHash} is not null`,
     })
     .from(users)
-    .where(and(eq(users.clientId, clientId), eq(users.role, "client")));
+    .where(and(inFirm(users.firmId, actor), eq(users.clientId, clientId), eq(users.role, "client")));
 }

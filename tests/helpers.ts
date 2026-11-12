@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
 import { openDatabase, type Db, type DbHandle } from "@/db";
 import { users, type UserRole } from "@/db/schema";
-import type { Actor } from "@/lib/auth/actor";
+import { actorFromUser, type Actor } from "@/lib/auth/actor";
 import { hashPassword } from "@/lib/auth/crypto";
 import { createClient } from "@/services/clients";
+import { createFirm } from "@/services/firms";
 
 /** A fresh, migrated, in-memory Postgres (PGlite) per test file. */
 export async function createTestDb(): Promise<DbHandle> {
@@ -12,11 +13,28 @@ export async function createTestDb(): Promise<DbHandle> {
   return handle;
 }
 
+/** Each test database gets one default firm, used whenever a test doesn't name a firm. */
+const defaultFirms = new WeakMap<Db, Promise<string>>();
+
+export function defaultFirmId(db: Db): Promise<string> {
+  let id = defaultFirms.get(db);
+  if (!id) {
+    id = createFirm(db, { name: "Test Firm", status: "active" }).then((f) => f.id);
+    defaultFirms.set(db, id);
+  }
+  return id;
+}
+
+/** Creates an additional firm (tenant) for isolation tests. */
+export async function createTestFirm(db: Db, name = "Other Firm"): Promise<string> {
+  return (await createFirm(db, { name, status: "active" })).id;
+}
+
 let counter = 0;
 
 export async function createUser(
   db: Db,
-  opts: { role: UserRole; clientId?: string; password?: string; name?: string; isActive?: boolean },
+  opts: { role: UserRole; clientId?: string; password?: string; name?: string; isActive?: boolean; firmId?: string },
 ): Promise<Actor> {
   counter += 1;
   const email = `user${counter}-${Date.now()}@example.test`;
@@ -24,6 +42,7 @@ export async function createUser(
   const [user] = await db
     .insert(users)
     .values({
+      firmId: opts.firmId ?? (await defaultFirmId(db)),
       email,
       name,
       role: opts.role,
@@ -33,16 +52,16 @@ export async function createUser(
     })
     .returning();
   if (!user) throw new Error("no user");
-  return { userId: user.id, role: user.role, clientId: user.clientId, name: user.name, email: user.email };
+  return actorFromUser(user);
 }
 
 export async function deactivate(db: Db, userId: string) {
   await db.update(users).set({ isActive: false }).where(eq(users.id, userId));
 }
 
-/** Creates a client record (as `staff`) plus a portal user for it. */
+/** Creates a client record (as `staff`, in staff's firm) plus a portal user for it. */
 export async function createClientWithPortalUser(db: Db, staff: Actor, displayName: string) {
   const client = await createClient(db, staff, { type: "individual", displayName });
-  const portalUser = await createUser(db, { role: "client", clientId: client.id });
+  const portalUser = await createUser(db, { role: "client", clientId: client.id, firmId: staff.firmId });
   return { client, portalUser };
 }

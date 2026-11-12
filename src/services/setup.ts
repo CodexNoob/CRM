@@ -3,11 +3,13 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@/db";
 import { users } from "@/db/schema";
-import type { Actor } from "@/lib/auth/actor";
+import { actorFromUser, type Actor } from "@/lib/auth/actor";
+import { site } from "@/content/site";
 import { hashPassword } from "@/lib/auth/crypto";
 import { AppError, ValidationError } from "@/lib/errors";
 import { parseInput, passwordSchema } from "@/lib/validation";
 import { recordAudit } from "./audit";
+import { createFirm, getDefaultFirm } from "./firms";
 
 /**
  * First-run setup: creates the firm's first admin from the web UI.
@@ -64,12 +66,16 @@ export async function createFirstAdmin(db: Db, input: unknown, expectedCode: str
     // Serializes concurrent setup attempts so only one first admin can ever be created.
     await t.execute(sql`select pg_advisory_xact_lock(724001)`);
     if (await hasAnyUsers(t)) throw new SetupUnavailableError();
+    // The first admin belongs to firm #1 (created here on a brand-new database; the
+    // multi-firm migration already created it if data existed). It is the operator's own
+    // firm, so it starts active rather than on a trial.
+    const firm = (await getDefaultFirm(t)) ?? (await createFirm(t, { name: site.name, status: "active" }));
     const [user] = await t
       .insert(users)
-      .values({ email: data.email, name: data.name, role: "admin", passwordHash })
+      .values({ firmId: firm.id, email: data.email, name: data.name, role: "admin", passwordHash })
       .returning();
     if (!user) throw new Error("Insert returned no row");
-    await recordAudit(t, { actorUserId: user.id, action: "setup.first_admin", entityType: "user", entityId: user.id });
-    return { userId: user.id, role: user.role, clientId: null, name: user.name, email: user.email };
+    await recordAudit(t, { firmId: firm.id, actorUserId: user.id, action: "setup.first_admin", entityType: "user", entityId: user.id });
+    return actorFromUser(user);
   });
 }

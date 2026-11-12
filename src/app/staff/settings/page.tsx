@@ -22,7 +22,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const requested = (await searchParams).tab;
   const tab: Tab = requested && requested in TABS ? (requested as Tab) : "profile";
   const db = getDb();
-  const [profile, list] = await Promise.all([getPublicProfile(db), listAllAnnouncements(db, actor)]);
+  const [profile, list] = await Promise.all([getPublicProfile(db, actor.firmId), listAllAnnouncements(db, actor)]);
 
   const security: [string, string, boolean][] = [
     ["Role-based access", "Admin, partner, preparer and client roles, enforced on the server for every record", true],

@@ -6,7 +6,7 @@ import type { PayPalInvoiceSnapshot, PayPalInvoiceStatus } from "@/integrations/
 import { seesAllClients, type Actor } from "@/lib/auth/actor";
 import { AppError, ForbiddenError, IntegrationNotConfiguredError, NotFoundError, ValidationError } from "@/lib/errors";
 import { isUuid, parseInvoiceInput } from "@/lib/validation";
-import { assertClientAccess, requireStaff, visibleClientsCondition } from "./access";
+import { assertClientAccess, inFirm, requireStaff, visibleClientsCondition } from "./access";
 import { recordAudit } from "./audit";
 
 /**
@@ -90,7 +90,7 @@ function requireBillingManager(actor: Actor) {
 async function loadForStaff(db: Db, actor: Actor, id: string): Promise<Invoice> {
   requireStaff(actor);
   if (!isUuid(id)) throw new NotFoundError();
-  const [row] = await db.select().from(invoices).where(eq(invoices.id, id)).limit(1);
+  const [row] = await db.select().from(invoices).where(and(eq(invoices.id, id), inFirm(invoices.firmId, actor))).limit(1);
   if (!row) throw new NotFoundError();
   await assertClientAccess(db, actor, row.clientId);
   return row;
@@ -124,12 +124,12 @@ export async function createInvoice(
 ): Promise<Invoice> {
   await assertClientAccess(db, actor, clientId);
   const data = parseInvoiceInput(input);
-  const [client] = await db.select({ name: clients.displayName, email: clients.email }).from(clients).where(eq(clients.id, clientId));
+  const [client] = await db.select({ name: clients.displayName, email: clients.email }).from(clients).where(and(eq(clients.id, clientId), inFirm(clients.firmId, actor)));
   if (!client?.email) {
     throw new ValidationError({ _form: ["This client has no email address. Add one on the client’s details first, so PayPal can send the invoice."] });
   }
   if (data.engagementId) {
-    const [eng] = await db.select({ id: engagements.id }).from(engagements).where(and(eq(engagements.id, data.engagementId), eq(engagements.clientId, clientId)));
+    const [eng] = await db.select({ id: engagements.id }).from(engagements).where(and(eq(engagements.id, data.engagementId), eq(engagements.clientId, clientId), inFirm(engagements.firmId, actor)));
     if (!eng) throw new ValidationError({ engagementId: ["Choose one of this client’s engagements."] });
   }
   requireConfigured(provider);
@@ -151,6 +151,7 @@ export async function createInvoice(
   const [row] = await db
     .insert(invoices)
     .values({
+      firmId: actor.firmId,
       clientId,
       engagementId: data.engagementId ?? null,
       title: data.title,
@@ -165,7 +166,7 @@ export async function createInvoice(
       ...applySnapshot(draft, now),
     })
     .returning();
-  await recordAudit(db, { actorUserId: actor.userId, action: "invoice.create", entityType: "invoice", entityId: row!.id, metadata: { clientId } });
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "invoice.create", entityType: "invoice", entityId: row!.id, metadata: { clientId } });
 
   return sendDraft(db, actor, row!, provider, now);
 }
@@ -182,9 +183,9 @@ async function sendDraft(db: Db, actor: Actor, row: Invoice, provider: InvoicePr
   const [updated] = await db
     .update(invoices)
     .set({ ...applySnapshot(sent, now), sentAt: now })
-    .where(eq(invoices.id, row.id))
+    .where(and(eq(invoices.id, row.id), eq(invoices.firmId, row.firmId)))
     .returning();
-  await recordAudit(db, { actorUserId: actor.userId, action: "invoice.send", entityType: "invoice", entityId: row.id, metadata: { clientId: row.clientId } });
+  await recordAudit(db, { firmId: row.firmId, actorUserId: actor.userId, action: "invoice.send", entityType: "invoice", entityId: row.id, metadata: { clientId: row.clientId } });
   return updated!;
 }
 
@@ -212,8 +213,8 @@ export async function cancelInvoice(db: Db, actor: Actor, id: string, provider: 
       throw paypalFailure("cancel the invoice", error);
     }
   }
-  await db.update(invoices).set({ status: "cancelled", syncedAt: now, updatedAt: now }).where(eq(invoices.id, row.id));
-  await recordAudit(db, { actorUserId: actor.userId, action: "invoice.cancel", entityType: "invoice", entityId: row.id, metadata: { clientId: row.clientId } });
+  await db.update(invoices).set({ status: "cancelled", syncedAt: now, updatedAt: now }).where(and(eq(invoices.id, row.id), eq(invoices.firmId, row.firmId)));
+  await recordAudit(db, { firmId: row.firmId, actorUserId: actor.userId, action: "invoice.cancel", entityType: "invoice", entityId: row.id, metadata: { clientId: row.clientId } });
 }
 
 /* ───────── Sync from PayPal ───────── */
@@ -227,10 +228,10 @@ async function syncRow(db: Db, row: Invoice, provider: InvoiceProvider, now: Dat
   const [updated] = await db
     .update(invoices)
     .set({ ...patch, ...(becamePaid ? { paidAt: now } : {}) })
-    .where(eq(invoices.id, row.id))
+    .where(and(eq(invoices.id, row.id), eq(invoices.firmId, row.firmId)))
     .returning();
   if (becamePaid) {
-    await recordAudit(db, { actorUserId: null, action: "invoice.paid", entityType: "invoice", entityId: row.id, metadata: { clientId: row.clientId } });
+    await recordAudit(db, { firmId: row.firmId, actorUserId: null, action: "invoice.paid", entityType: "invoice", entityId: row.id, metadata: { clientId: row.clientId } });
   }
   return updated!;
 }
@@ -312,8 +313,9 @@ const listColumns = {
 /** Invoices for one client (staff). */
 export async function listClientInvoices(db: Db, actor: Actor, clientId: string, provider: InvoiceProvider = paypalProvider(), now = new Date()): Promise<InvoiceListRow[]> {
   await assertClientAccess(db, actor, clientId);
-  await refreshStale(db, eq(invoices.clientId, clientId), provider, now);
-  return db.select(listColumns).from(invoices).innerJoin(clients, eq(clients.id, invoices.clientId)).where(eq(invoices.clientId, clientId)).orderBy(desc(invoices.createdAt));
+  const mine = and(inFirm(invoices.firmId, actor), eq(invoices.clientId, clientId));
+  await refreshStale(db, mine, provider, now);
+  return db.select(listColumns).from(invoices).innerJoin(clients, eq(clients.id, invoices.clientId)).where(mine).orderBy(desc(invoices.createdAt));
 }
 
 /** All invoices on clients the staff member can see. */
@@ -324,9 +326,7 @@ export async function listInvoices(
   provider: InvoiceProvider = paypalProvider(),
   now = new Date(),
 ): Promise<InvoiceListRow[]> {
-  const visible = visibleClientsCondition(db, actor);
-  const visibleIds = visible ? db.select({ id: clients.id }).from(clients).where(visible) : undefined;
-  const scope = visibleIds ? inArray(invoices.clientId, visibleIds) : undefined;
+  const scope = and(inFirm(invoices.firmId, actor), inArray(invoices.clientId, db.select({ id: clients.id }).from(clients).where(visibleClientsCondition(db, actor))));
   await refreshStale(db, scope, provider, now, 25);
   const statusFilter = opts.status === "open" ? inArray(invoices.status, OPEN_STATUSES) : opts.status ? eq(invoices.status, opts.status) : undefined;
   return db
@@ -347,8 +347,7 @@ export interface InvoiceTotals {
 
 /** Headline figures from the linked copies (refreshed from PayPal on list views). */
 export async function invoiceTotals(db: Db, actor: Actor, today: string, now = new Date()): Promise<InvoiceTotals> {
-  const visible = visibleClientsCondition(db, actor);
-  const scope = visible ? inArray(invoices.clientId, db.select({ id: clients.id }).from(clients).where(visible)) : undefined;
+  const scope = and(inFirm(invoices.firmId, actor), inArray(invoices.clientId, db.select({ id: clients.id }).from(clients).where(visibleClientsCondition(db, actor))));
   const since = new Date(now.getTime() - 30 * 24 * 3600_000);
   const [row] = await db
     .select({
@@ -381,7 +380,7 @@ export interface PortalInvoice {
 /** The signed-in client's own invoices. Drafts are never shown to clients. */
 export async function listPortalInvoices(db: Db, actor: Actor, provider: InvoiceProvider = paypalProvider(), now = new Date()): Promise<PortalInvoice[]> {
   if (actor.role !== "client" || !actor.clientId) throw new ForbiddenError();
-  const mine = and(eq(invoices.clientId, actor.clientId), ne(invoices.status, "draft"));
+  const mine = and(inFirm(invoices.firmId, actor), eq(invoices.clientId, actor.clientId), ne(invoices.status, "draft"));
   await refreshStale(db, mine, provider, now);
   const rows = await db
     .select({
@@ -410,6 +409,6 @@ export async function countOpenPortalInvoices(db: Db, actor: Actor): Promise<num
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(invoices)
-    .where(and(eq(invoices.clientId, actor.clientId), inArray(invoices.status, OPEN_STATUSES)));
+    .where(and(inFirm(invoices.firmId, actor), eq(invoices.clientId, actor.clientId), inArray(invoices.status, OPEN_STATUSES)));
   return row?.n ?? 0;
 }

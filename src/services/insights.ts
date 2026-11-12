@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNotNull, lt, notInArray, or, sql, type S
 import type { Db } from "@/db";
 import { auditEvents, clientAssignments, clients, documents, engagements, tasks, users, type EngagementStatus } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
-import { assertClientAccess, requireStaff, visibleClientsCondition } from "./access";
+import { assertClientAccess, inFirm, requireStaff, visibleClientsCondition } from "./access";
 import { firmToday } from "./dashboard";
 
 /* ───────── Activity feed (from the audit trail, scoped to records the actor can see) ───────── */
@@ -18,16 +18,19 @@ export interface ActivityItem {
   createdAt: Date;
 }
 
-/** Resolves the client an audit event belongs to (client, engagement, document or task events). */
+/**
+ * Resolves the client an audit event belongs to (client, engagement, document or task events).
+ * Lookups are limited to the event's own firm; queries using this are also firm-filtered.
+ */
 const eventClientId = sql<string | null>`coalesce(
   case when ${auditEvents.entityType} = 'client' then ${auditEvents.entityId} end,
-  (select e.client_id::text from engagements e where ${auditEvents.entityType} = 'engagement' and e.id::text = ${auditEvents.entityId}),
-  (select d.client_id::text from documents d where ${auditEvents.entityType} = 'document' and d.id::text = ${auditEvents.entityId}),
-  (select e.client_id::text from tasks t join engagements e on e.id = t.engagement_id where ${auditEvents.entityType} = 'task' and t.id::text = ${auditEvents.entityId}),
+  (select e.client_id::text from engagements e where ${auditEvents.entityType} = 'engagement' and e.id::text = ${auditEvents.entityId} and e.firm_id = ${auditEvents.firmId}),
+  (select d.client_id::text from documents d where ${auditEvents.entityType} = 'document' and d.id::text = ${auditEvents.entityId} and d.firm_id = ${auditEvents.firmId}),
+  (select e.client_id::text from tasks t join engagements e on e.id = t.engagement_id where ${auditEvents.entityType} = 'task' and t.id::text = ${auditEvents.entityId} and t.firm_id = ${auditEvents.firmId}),
   ${auditEvents.metadata} ->> 'clientId'
 )`;
 
-async function activity(db: Db, where: SQL | undefined, limit: number): Promise<ActivityItem[]> {
+async function activity(db: Db, actor: Actor, where: SQL | undefined, limit: number): Promise<ActivityItem[]> {
   const rows = await db
     .select({
       id: auditEvents.id,
@@ -40,12 +43,12 @@ async function activity(db: Db, where: SQL | undefined, limit: number): Promise<
     })
     .from(auditEvents)
     .leftJoin(users, eq(users.id, auditEvents.actorUserId))
-    .where(and(sql`${auditEvents.action} not like 'auth.%'`, sql`${auditEvents.action} not like 'setup.%'`, where))
+    .where(and(inFirm(auditEvents.firmId, actor), sql`${auditEvents.action} not like 'auth.%'`, sql`${auditEvents.action} not like 'setup.%'`, where))
     .orderBy(desc(auditEvents.createdAt))
     .limit(limit * 3);
   // Attach client names and drop events whose client the caller cannot resolve.
   const ids = [...new Set(rows.map((r) => r.clientId).filter((x): x is string => !!x))];
-  const names = ids.length ? await db.select({ id: clients.id, name: clients.displayName }).from(clients).where(inArray(sql`${clients.id}::text`, ids)) : [];
+  const names = ids.length ? await db.select({ id: clients.id, name: clients.displayName }).from(clients).where(and(inFirm(clients.firmId, actor), inArray(sql`${clients.id}::text`, ids))) : [];
   const nameOf = new Map(names.map((n) => [n.id, n.name]));
   return rows
     .filter((r) => r.clientId && nameOf.has(r.clientId))
@@ -56,15 +59,13 @@ async function activity(db: Db, where: SQL | undefined, limit: number): Promise<
 /** Recent activity on one client. Requires access to the client. */
 export async function listClientActivity(db: Db, actor: Actor, clientId: string, limit = 50): Promise<ActivityItem[]> {
   await assertClientAccess(db, actor, clientId);
-  return activity(db, sql`${eventClientId} = ${clientId}`, limit);
+  return activity(db, actor, sql`${eventClientId} = ${clientId}`, limit);
 }
 
 /** Recent activity across every client the staff member can see. */
 export async function listRecentClientActivity(db: Db, actor: Actor, limit = 12): Promise<ActivityItem[]> {
-  const visible = visibleClientsCondition(db, actor);
-  if (!visible) return activity(db, undefined, limit);
-  const visibleIds = db.select({ id: sql`${clients.id}::text` }).from(clients).where(visible);
-  return activity(db, sql`${eventClientId} in (${visibleIds})`, limit);
+  const visibleIds = db.select({ id: sql`${clients.id}::text` }).from(clients).where(visibleClientsCondition(db, actor));
+  return activity(db, actor, sql`${eventClientId} in (${visibleIds})`, limit);
 }
 
 export const ACTIVITY_LABELS: Record<string, string> = {
@@ -122,16 +123,16 @@ export async function getWorkload(db: Db, actor: Actor): Promise<WorkloadRow[]> 
       })
       .from(engagements)
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(visible, open))
+      .where(and(visible, inFirm(engagements.firmId, actor), open))
       .groupBy(engagements.ownerId),
     db
       .select({ assigneeId: tasks.assigneeId, n: sql<number>`count(*)::int` })
       .from(tasks)
       .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(visible, eq(tasks.status, "open"), isNotNull(tasks.assigneeId)))
+      .where(and(visible, inFirm(tasks.firmId, actor), eq(tasks.status, "open"), isNotNull(tasks.assigneeId)))
       .groupBy(tasks.assigneeId),
-    db.select({ id: users.id, name: users.name, role: users.role }).from(users).where(and(eq(users.isActive, true), inArray(users.role, ["admin", "partner", "preparer"]))).orderBy(asc(users.name)),
+    db.select({ id: users.id, name: users.name, role: users.role }).from(users).where(and(inFirm(users.firmId, actor), eq(users.isActive, true), inArray(users.role, ["admin", "partner", "preparer"]))).orderBy(asc(users.name)),
   ]);
   const e = new Map(eng.map((r) => [r.ownerId, r]));
   const t = new Map(tsk.map((r) => [r.assigneeId, r.n]));
@@ -158,18 +159,18 @@ export async function getPracticeCounts(db: Db, actor: Actor) {
       .select({ n })
       .from(engagements)
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(visible, inArray(engagements.serviceType, ["individual_tax", "business_tax"]), notInArray(engagements.status, ["filed", "completed"]))),
+      .where(and(visible, inFirm(engagements.firmId, actor), inArray(engagements.serviceType, ["individual_tax", "business_tax"]), notInArray(engagements.status, ["filed", "completed"]))),
     db
       .select({ n })
       .from(tasks)
       .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(visible, eq(tasks.isClientTask, true), eq(tasks.status, "open"))),
+      .where(and(visible, inFirm(tasks.firmId, actor), eq(tasks.isClientTask, true), eq(tasks.status, "open"))),
     db
       .select({ n })
       .from(documents)
       .innerJoin(clients, eq(clients.id, documents.clientId))
-      .where(and(visible, sql`${documents.createdAt} > now() - interval '7 days'`, sql`${documents.deletedAt} is null`)),
+      .where(and(visible, inFirm(documents.firmId, actor), sql`${documents.createdAt} > now() - interval '7 days'`, sql`${documents.deletedAt} is null`)),
   ]);
   return { pendingReturns: pendingReturns[0]?.n ?? 0, openClientRequests: openRequests[0]?.n ?? 0, documentsThisWeek: docs7[0]?.n ?? 0 };
 }
@@ -183,7 +184,7 @@ export async function listAttentionTasks(db: Db, actor: Actor, limit = 8) {
     .from(tasks)
     .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
     .innerJoin(clients, eq(clients.id, engagements.clientId))
-    .where(and(visible, eq(tasks.assigneeId, actor.userId), eq(tasks.status, "open"), or(lt(tasks.dueDate, soon), sql`${tasks.dueDate} = ${soon}`)))
+    .where(and(visible, inFirm(tasks.firmId, actor), eq(tasks.assigneeId, actor.userId), eq(tasks.status, "open"), or(lt(tasks.dueDate, soon), sql`${tasks.dueDate} = ${soon}`)))
     .orderBy(asc(tasks.dueDate))
     .limit(limit);
 }
@@ -214,9 +215,9 @@ export async function listClientsOverview(db: Db, actor: Actor): Promise<ClientO
       email: clients.email,
       phone: clients.phone,
       createdAt: clients.createdAt,
-      openEngagements: sql<number>`(select count(*)::int from engagements e where e.client_id = "clients"."id" and e.status not in ('filed','completed'))`,
-      team: sql<string | null>`(select string_agg(u.name, ', ' order by u.name) from client_assignments ca join users u on u.id = ca.user_id where ca.client_id = "clients"."id" and u.is_active)`,
-      portalUsers: sql<number>`(select count(*)::int from users pu where pu.client_id = "clients"."id" and pu.role = 'client' and pu.is_active)`,
+      openEngagements: sql<number>`(select count(*)::int from engagements e where e.client_id = "clients"."id" and e.firm_id = "clients"."firm_id" and e.status not in ('filed','completed'))`,
+      team: sql<string | null>`(select string_agg(u.name, ', ' order by u.name) from client_assignments ca join users u on u.id = ca.user_id where ca.client_id = "clients"."id" and ca.firm_id = "clients"."firm_id" and u.firm_id = "clients"."firm_id" and u.is_active)`,
+      portalUsers: sql<number>`(select count(*)::int from users pu where pu.client_id = "clients"."id" and pu.firm_id = "clients"."firm_id" and pu.role = 'client' and pu.is_active)`,
     })
     .from(clients)
     .where(visible)
@@ -232,7 +233,7 @@ export async function getClientTeam(db: Db, actor: Actor, clientId: string) {
     .select({ id: users.id, name: users.name, role: users.role })
     .from(clientAssignments)
     .innerJoin(users, eq(users.id, clientAssignments.userId))
-    .where(and(eq(clientAssignments.clientId, clientId), eq(users.isActive, true)))
+    .where(and(inFirm(clientAssignments.firmId, actor), inFirm(users.firmId, actor), eq(clientAssignments.clientId, clientId), eq(users.isActive, true)))
     .orderBy(asc(users.name));
 }
 
@@ -242,7 +243,7 @@ export async function getLatestTaxEngagement(db: Db, actor: Actor, clientId: str
   const [row] = await db
     .select({ taxYear: engagements.taxYear, status: engagements.status, title: engagements.title })
     .from(engagements)
-    .where(and(eq(engagements.clientId, clientId), inArray(engagements.serviceType, ["individual_tax", "business_tax"])))
+    .where(and(inFirm(engagements.firmId, actor), eq(engagements.clientId, clientId), inArray(engagements.serviceType, ["individual_tax", "business_tax"])))
     .orderBy(sql`${engagements.taxYear} desc nulls last`, desc(engagements.createdAt))
     .limit(1);
   return row ?? null;

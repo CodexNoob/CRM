@@ -3,7 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@/db";
 import { clients, engagements, tasks, users } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
-import { visibleClientsCondition } from "./access";
+import { inFirm, visibleClientsCondition } from "./access";
 
 export interface TaskRow {
   id: string;
@@ -45,6 +45,8 @@ export async function listTasks(
     .leftJoin(assignee, eq(assignee.id, tasks.assigneeId))
     .where(
       and(
+        inFirm(tasks.firmId, actor),
+        inFirm(engagements.firmId, actor),
         visible,
         eq(tasks.status, opts.status ?? "open"),
         opts.mine ? eq(tasks.assigneeId, actor.userId) : undefined,
@@ -62,6 +64,6 @@ export async function countMyOpenTasks(db: Db, actor: Actor): Promise<number> {
     .from(tasks)
     .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
     .innerJoin(clients, eq(clients.id, engagements.clientId))
-    .where(and(visible, eq(tasks.assigneeId, actor.userId), eq(tasks.status, "open")));
+    .where(and(inFirm(tasks.firmId, actor), inFirm(engagements.firmId, actor), visible, eq(tasks.assigneeId, actor.userId), eq(tasks.status, "open")));
   return row?.n ?? 0;
 }

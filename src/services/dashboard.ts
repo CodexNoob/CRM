@@ -3,7 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@/db";
 import { clients, engagements, tasks, users, type EngagementStatus } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
-import { requireStaff, visibleClientsCondition } from "./access";
+import { inFirm, requireStaff, visibleClientsCondition } from "./access";
 
 /** Statuses that need no further work. Everything else counts as open. */
 const DONE: EngagementStatus[] = ["completed", "filed"];
@@ -44,7 +44,9 @@ export async function getDashboard(db: Db, actor: Actor, opts: { mine?: boolean;
   const visible = visibleClientsCondition(db, actor);
   const mine = opts.mine ? eq(engagements.ownerId, actor.userId) : undefined;
   const open = notInArray(engagements.status, DONE);
-  const base = and(visible, mine);
+  const engFirm = inFirm(engagements.firmId, actor);
+  const base = and(engFirm, visible, mine);
+  const taskFirm = and(inFirm(tasks.firmId, actor), engFirm);
 
   const count = sql<number>`count(*)::int`;
   const scoped = () => db.select({ n: count }).from(engagements).innerJoin(clients, eq(clients.id, engagements.clientId));
@@ -60,7 +62,7 @@ export async function getDashboard(db: Db, actor: Actor, opts: { mine?: boolean;
       .from(tasks)
       .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(visible, eq(tasks.assigneeId, actor.userId), eq(tasks.status, "open"))),
+      .where(and(taskFirm, visible, eq(tasks.assigneeId, actor.userId), eq(tasks.status, "open"))),
     db.select({ n: count }).from(clients).where(and(visible, eq(clients.status, "active"))),
     db
       .select({ status: engagements.status, count })
@@ -96,7 +98,7 @@ export async function getDashboard(db: Db, actor: Actor, opts: { mine?: boolean;
       .from(tasks)
       .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(visible, eq(tasks.assigneeId, actor.userId), eq(tasks.status, "open")))
+      .where(and(taskFirm, visible, eq(tasks.assigneeId, actor.userId), eq(tasks.status, "open")))
       .orderBy(sql`${tasks.dueDate} asc nulls last`, asc(tasks.createdAt))
       .limit(8),
     db

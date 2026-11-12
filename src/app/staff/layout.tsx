@@ -25,7 +25,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     countLeadsByStatus(db, actor),
     countUnreadForStaff(db, actor),
     getNotifications(db, actor),
-    getPublicProfile(db),
+    getPublicProfile(db, actor.firmId),
     cookies(),
   ]);
 

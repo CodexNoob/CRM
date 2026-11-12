@@ -1,7 +1,7 @@
 import { eq, lt } from "drizzle-orm";
 import type { Db } from "@/db";
 import { sessions, users } from "@/db/schema";
-import type { Actor } from "./actor";
+import { actorFromUser, type Actor } from "./actor";
 import { generateToken, hashToken } from "./crypto";
 
 /** Idle timeout: a session unused for this long expires. */
@@ -50,7 +50,7 @@ export async function validateSessionToken(db: Db, token: string, now = new Date
     await db.update(sessions).set({ expiresAt: next }).where(eq(sessions.id, id));
   }
 
-  return { userId: user.id, role: user.role, clientId: user.clientId, name: user.name, email: user.email };
+  return actorFromUser(user);
 }
 
 export async function invalidateSession(db: Db, token: string): Promise<void> {

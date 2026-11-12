@@ -3,10 +3,12 @@
  * link for them to set their own password. No password ever passes through
  * the command line.
  *
- *   npm run user:invite -- --email jane@firm.example --name "Jane Doe" --role admin
+ *   npm run user:invite -- --email jane@firm.example --name "Jane Doe" --role admin [--firm <slug>]
+ * Without --firm, the user joins the default firm (DEFAULT_FIRM_SLUG, else firm #1).
  */
 import type { StaffRole } from "@/lib/auth/actor";
 import { STAFF_ROLES } from "@/lib/auth/actor";
+import { getDefaultFirm, getFirmBySlug } from "@/services/firms";
 import { createStaffInvitation } from "@/services/users";
 import { appUrl, argValue, openFromEnv } from "./env";
 
@@ -21,8 +23,11 @@ if (!email || !name || !role || !STAFF_ROLES.includes(role)) {
 
 const { handle } = openFromEnv();
 try {
-  const { token } = await createStaffInvitation(handle.db, { email, name, role }, null);
-  console.log(`Invitation for ${email} (${role}). Single use, expires in 72 hours:`);
+  const slug = argValue("firm");
+  const firm = slug ? await getFirmBySlug(handle.db, slug) : await getDefaultFirm(handle.db);
+  if (!firm) throw new Error("No firm exists yet. Run the first-run setup (/setup) first.");
+  const { token } = await createStaffInvitation(handle.db, firm.id, { email, name, role }, null);
+  console.log(`Invitation for ${email} (${role}) at ${firm.name}. Single use, expires in 72 hours:`);
   console.log(`${appUrl()}/setup-password?token=${encodeURIComponent(token)}`);
 } finally {
   await handle.close();

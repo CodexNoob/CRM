@@ -5,6 +5,7 @@ import { after } from "next/server";
 import { notifyNewInquiry } from "@/services/notifications";
 import { getDb } from "@/db";
 import { errorState, formValues, type ActionState } from "@/lib/action-state";
+import { getDefaultFirm } from "@/services/firms";
 import { SpamRejectedError, submitWebsiteInquiry } from "@/services/leads";
 
 /**
@@ -32,7 +33,11 @@ export async function submitInquiryAction(_prev: ActionState, formData: FormData
     const h = await headers();
     const ip = (h.get("x-forwarded-for") ?? "").split(",")[0]!.trim() || h.get("x-real-ip") || "unknown";
     if (!allow(ip)) throw new SpamRejectedError();
-    const lead = await submitWebsiteInquiry(getDb(), formValues(formData));
+    const db = getDb();
+    // The home page (and its form) belongs to the default firm until per-firm pages exist.
+    const firm = await getDefaultFirm(db);
+    if (!firm) throw new SpamRejectedError();
+    const lead = await submitWebsiteInquiry(db, firm.id, formValues(formData));
     // Send the staff alert after the response, so the visitor never waits on (or sees) email problems.
     after(() => notifyNewInquiry(lead));
   } catch (error) {

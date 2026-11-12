@@ -59,7 +59,7 @@ describe("tax & accounting views", () => {
 
 describe("settings drive the website", () => {
   it("uses defaults until an admin saves a profile, then the database", async () => {
-    const before = await getWebsiteContent(h.db);
+    const before = await getWebsiteContent(h.db, admin.firmId);
     expect(before.profile).toMatchObject({ name: site.name, fromDatabase: false });
 
     await saveFirmProfile(h.db, admin, {
@@ -69,21 +69,21 @@ describe("settings drive the website", () => {
       addressLine1: "1 Main St",
       hours: "Mon – Fri | 9–5\nSat | By appointment",
     });
-    const after = await getWebsiteContent(h.db);
+    const after = await getWebsiteContent(h.db, admin.firmId);
     expect(after.profile).toMatchObject({ name: "Rivera & Co. CPAs", phone: "(555) 010-2222", addressLines: ["1 Main St"], fromDatabase: true });
     expect(after.profile.hours).toEqual([["Mon – Fri", "9–5"], ["Sat", "By appointment"]]);
 
     // Saving again updates the single profile row.
     await saveFirmProfile(h.db, admin, { name: "Rivera CPAs" });
-    expect((await getWebsiteContent(h.db)).profile.name).toBe("Rivera CPAs");
+    expect((await getWebsiteContent(h.db, admin.firmId)).profile.name).toBe("Rivera CPAs");
   });
 
   it("replaces default announcements once the firm manages its own", async () => {
-    expect((await getWebsiteContent(h.db)).announcements[0]!.id).toMatch(/^default-/);
+    expect((await getWebsiteContent(h.db, admin.firmId)).announcements[0]!.id).toMatch(/^default-/);
     const a = await createAnnouncement(h.db, admin, { title: "Office closed Friday", body: "We reopen Monday.", publishedOn: "2026-11-20" });
-    expect((await getWebsiteContent(h.db)).announcements.map((x) => x.title)).toEqual(["Office closed Friday"]);
+    expect((await getWebsiteContent(h.db, admin.firmId)).announcements.map((x) => x.title)).toEqual(["Office closed Friday"]);
     await setAnnouncementPublished(h.db, admin, a.id, false);
-    expect((await getWebsiteContent(h.db)).announcements).toEqual([]);
+    expect((await getWebsiteContent(h.db, admin.firmId)).announcements).toEqual([]);
   });
 
   it("is admin-only and validated", async () => {

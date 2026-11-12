@@ -3,7 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@/db";
 import { auditEvents, clients, documents, engagements, leads, messages, users, type EngagementStatus, type ServiceType } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
-import { requireStaff, visibleClientsCondition } from "./access";
+import { inFirm, requireStaff, visibleClientsCondition } from "./access";
 
 /** Views over engagement data for the Tax & Accounting modules. */
 
@@ -38,7 +38,7 @@ export async function listWork(db: Db, actor: Actor, opts: { services: ServiceTy
       clientId: clients.id,
       clientName: clients.displayName,
       ownerName: owner.name,
-      openTasks: sql<number>`(select count(*)::int from tasks t where t.engagement_id = ${engagements.id} and t.status = 'open')`,
+      openTasks: sql<number>`(select count(*)::int from tasks t where t.engagement_id = ${engagements.id} and t.firm_id = ${engagements.firmId} and t.status = 'open')`,
       updatedAt: engagements.updatedAt,
     })
     .from(engagements)
@@ -46,6 +46,7 @@ export async function listWork(db: Db, actor: Actor, opts: { services: ServiceTy
     .innerJoin(owner, eq(owner.id, engagements.ownerId))
     .where(
       and(
+        inFirm(engagements.firmId, actor),
         visible,
         inArray(engagements.serviceType, opts.services),
         opts.taxYear ? eq(engagements.taxYear, opts.taxYear) : undefined,
@@ -62,7 +63,7 @@ export async function listTaxYears(db: Db, actor: Actor): Promise<number[]> {
     .selectDistinct({ y: engagements.taxYear })
     .from(engagements)
     .innerJoin(clients, eq(clients.id, engagements.clientId))
-    .where(and(visible, inArray(engagements.serviceType, TAX_SERVICES)))
+    .where(and(inFirm(engagements.firmId, actor), visible, inArray(engagements.serviceType, TAX_SERVICES)))
     .orderBy(desc(engagements.taxYear));
   return rows.map((r) => r.y).filter((y): y is number => y !== null);
 }
@@ -87,7 +88,7 @@ export async function listPortalAccounts(db: Db, actor: Actor): Promise<PortalAc
   const lastLogin = db
     .select({ userId: auditEvents.actorUserId, at: max(auditEvents.createdAt).as("at") })
     .from(auditEvents)
-    .where(eq(auditEvents.action, "auth.login"))
+    .where(and(inFirm(auditEvents.firmId, actor), eq(auditEvents.action, "auth.login")))
     .groupBy(auditEvents.actorUserId)
     .as("last_login");
   return db
@@ -100,13 +101,13 @@ export async function listPortalAccounts(db: Db, actor: Actor): Promise<PortalAc
       clientId: clients.id,
       clientName: clients.displayName,
       lastSignIn: lastLogin.at,
-      unreadFromClient: sql<number>`(select count(*)::int from ${messages} m where m.client_id = ${clients.id} and m.from_client and m.read_at is null)`,
-      sharedDocuments: sql<number>`(select count(*)::int from ${documents} d where d.client_id = ${clients.id} and d.visible_to_client and d.deleted_at is null)`,
+      unreadFromClient: sql<number>`(select count(*)::int from ${messages} m where m.client_id = ${clients.id} and m.firm_id = ${clients.firmId} and m.from_client and m.read_at is null)`,
+      sharedDocuments: sql<number>`(select count(*)::int from ${documents} d where d.client_id = ${clients.id} and d.firm_id = ${clients.firmId} and d.visible_to_client and d.deleted_at is null)`,
     })
     .from(users)
     .innerJoin(clients, eq(clients.id, users.clientId))
     .leftJoin(lastLogin, eq(lastLogin.userId, users.id))
-    .where(and(eq(users.role, "client"), visible))
+    .where(and(inFirm(users.firmId, actor), eq(users.role, "client"), visible))
     .orderBy(asc(clients.displayName), asc(users.name));
 }
 
@@ -126,30 +127,39 @@ export async function getPracticeReport(db: Db, actor: Actor, now = new Date()):
   const since = new Date(now.getTime() - 30 * 86_400_000);
   const n = sql<number>`count(*)::int`;
   const done = sql<boolean>`${engagements.status} in ('filed', 'completed')`;
+  const engFirm = inFirm(engagements.firmId, actor);
 
   const [byServiceRows, byStatus, leadRows, sourceRows, newClients, docs, msgs, completed] = await Promise.all([
     db
       .select({ serviceType: engagements.serviceType, done, count: n })
       .from(engagements)
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(visible)
+      .where(and(engFirm, visible))
       .groupBy(engagements.serviceType, done),
     db
       .select({ status: engagements.status, count: n })
       .from(engagements)
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(visible)
+      .where(and(engFirm, visible))
       .groupBy(engagements.status),
-    db.select({ status: leads.status, count: n }).from(leads).groupBy(leads.status),
-    db.select({ source: leads.source, count: n }).from(leads).groupBy(leads.source),
+    db.select({ status: leads.status, count: n }).from(leads).where(inFirm(leads.firmId, actor)).groupBy(leads.status),
+    db.select({ source: leads.source, count: n }).from(leads).where(inFirm(leads.firmId, actor)).groupBy(leads.source),
     db.select({ count: n }).from(clients).where(and(visible, gte(clients.createdAt, since))),
-    db.select({ count: n }).from(documents).innerJoin(clients, eq(clients.id, documents.clientId)).where(and(visible, gte(documents.createdAt, since))),
-    db.select({ count: n }).from(messages).innerJoin(clients, eq(clients.id, messages.clientId)).where(and(visible, gte(messages.createdAt, since))),
+    db
+      .select({ count: n })
+      .from(documents)
+      .innerJoin(clients, eq(clients.id, documents.clientId))
+      .where(and(inFirm(documents.firmId, actor), visible, gte(documents.createdAt, since))),
+    db
+      .select({ count: n })
+      .from(messages)
+      .innerJoin(clients, eq(clients.id, messages.clientId))
+      .where(and(inFirm(messages.firmId, actor), visible, gte(messages.createdAt, since))),
     db
       .select({ count: n })
       .from(engagements)
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(visible, done, gte(engagements.updatedAt, since))),
+      .where(and(engFirm, visible, done, gte(engagements.updatedAt, since))),
   ]);
 
   const services = new Map<ServiceType, { open: number; done: number }>();

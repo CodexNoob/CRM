@@ -71,7 +71,8 @@ describe("clients", () => {
     const c = await createClient(h.db, admin, { type: "individual", displayName: "Audit Person", email: "a@example.test" });
     await updateClient(h.db, admin, c.id, { type: "individual", displayName: "Audit Person", email: "secret-new@example.test" });
     const events = await h.db.select().from(auditEvents).where(eq(auditEvents.entityId, c.id));
-    expect(events.map((e) => e.action).sort()).toEqual(["client.create", "client.update"]);
+    // Creating a client also records the creator's access grant (client.assign).
+    expect(events.map((e) => e.action).sort()).toEqual(["client.assign", "client.create", "client.update"]);
     const update = events.find((e) => e.action === "client.update")!;
     expect(update.metadata).toEqual({ changedFields: ["email"] });
     expect(JSON.stringify(events)).not.toContain("secret-new@example.test");

@@ -80,7 +80,7 @@ export async function portalSubscribeAction(id: string, _prev: ActionState, _for
   let approveUrl: string;
   try {
     const db = getDb();
-    const profile = await getPublicProfile(db);
+    const profile = await getPublicProfile(db, actor.firmId);
     const base = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
     approveUrl = await startPortalSubscription(db, actor, id, {
       returnUrl: `${base}/portal/invoices?subscribed=1`,

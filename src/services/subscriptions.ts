@@ -6,7 +6,7 @@ import type { PayPalSubscriptionSnapshot, PayPalSubscriptionStatus } from "@/int
 import { seesAllClients, type Actor } from "@/lib/auth/actor";
 import { ForbiddenError, IntegrationNotConfiguredError, NotFoundError, ValidationError } from "@/lib/errors";
 import { isUuid, parseInput, subscriptionInputSchema } from "@/lib/validation";
-import { assertClientAccess, requireStaff, visibleClientsCondition } from "./access";
+import { assertClientAccess, inFirm, requireStaff, visibleClientsCondition } from "./access";
 import { recordAudit } from "./audit";
 import { paypalFailure } from "./invoices";
 
@@ -79,9 +79,9 @@ async function syncRow(db: Db, row: Subscription, p: SubscriptionProvider, now: 
   const snap = await p.getSubscription(row.paypalSubscriptionId);
   // A checkout the client walked away from stays APPROVAL_PENDING → "pending", so they can start again.
   const patch = patchFrom(snap, row, now);
-  const [updated] = await db.update(subscriptions).set(patch).where(eq(subscriptions.id, row.id)).returning();
+  const [updated] = await db.update(subscriptions).set(patch).where(and(eq(subscriptions.id, row.id), eq(subscriptions.firmId, row.firmId))).returning();
   if (patch.status === "active" && row.status !== "active") {
-    await recordAudit(db, { actorUserId: null, action: "subscription.activate", entityType: "subscription", entityId: row.id, metadata: { clientId: row.clientId } });
+    await recordAudit(db, { firmId: row.firmId, actorUserId: null, action: "subscription.activate", entityType: "subscription", entityId: row.id, metadata: { clientId: row.clientId } });
   }
   return updated!;
 }
@@ -112,7 +112,7 @@ async function refreshStale(db: Db, where: ReturnType<typeof and>, p: Subscripti
 export async function createSubscriptionPlan(db: Db, actor: Actor, clientId: string, input: Record<string, unknown>, p: SubscriptionProvider = paypalSubscriptions()): Promise<Subscription> {
   await assertClientAccess(db, actor, clientId);
   const data = parseInput(subscriptionInputSchema, input);
-  const [client] = await db.select({ email: clients.email }).from(clients).where(eq(clients.id, clientId));
+  const [client] = await db.select({ email: clients.email }).from(clients).where(and(eq(clients.id, clientId), inFirm(clients.firmId, actor)));
   if (!client?.email) throw new ValidationError({ _form: ["This client has no email address. Add one on the client’s details first."] });
   requireConfigured(p);
   let planId: string;
@@ -123,16 +123,16 @@ export async function createSubscriptionPlan(db: Db, actor: Actor, clientId: str
   }
   const [row] = await db
     .insert(subscriptions)
-    .values({ clientId, name: data.name, amountCents: data.amountCents, currency: p.currency, interval: data.interval, paypalPlanId: planId, createdById: actor.userId })
+    .values({ firmId: actor.firmId, clientId, name: data.name, amountCents: data.amountCents, currency: p.currency, interval: data.interval, paypalPlanId: planId, createdById: actor.userId })
     .returning();
-  await recordAudit(db, { actorUserId: actor.userId, action: "subscription.create", entityType: "subscription", entityId: row!.id, metadata: { clientId } });
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "subscription.create", entityType: "subscription", entityId: row!.id, metadata: { clientId } });
   return row!;
 }
 
 async function loadForStaff(db: Db, actor: Actor, id: string): Promise<Subscription> {
   requireStaff(actor);
   if (!isUuid(id)) throw new NotFoundError();
-  const [row] = await db.select().from(subscriptions).where(eq(subscriptions.id, id));
+  const [row] = await db.select().from(subscriptions).where(and(eq(subscriptions.id, id), inFirm(subscriptions.firmId, actor)));
   if (!row) throw new NotFoundError();
   await assertClientAccess(db, actor, row.clientId);
   return row;
@@ -162,8 +162,8 @@ export async function cancelSubscription(db: Db, actor: Actor, id: string, p: Su
       throw paypalFailure("cancel the subscription", error);
     }
   }
-  await db.update(subscriptions).set({ status: "cancelled", cancelledAt: now, syncedAt: now, updatedAt: now }).where(eq(subscriptions.id, row.id));
-  await recordAudit(db, { actorUserId: actor.userId, action: "subscription.cancel", entityType: "subscription", entityId: row.id, metadata: { clientId: row.clientId } });
+  await db.update(subscriptions).set({ status: "cancelled", cancelledAt: now, syncedAt: now, updatedAt: now }).where(and(eq(subscriptions.id, row.id), eq(subscriptions.firmId, row.firmId)));
+  await recordAudit(db, { firmId: row.firmId, actorUserId: actor.userId, action: "subscription.cancel", entityType: "subscription", entityId: row.id, metadata: { clientId: row.clientId } });
 }
 
 export interface SubscriptionRow {
@@ -196,13 +196,13 @@ const cols = {
 
 export async function listClientSubscriptions(db: Db, actor: Actor, clientId: string, p: SubscriptionProvider = paypalSubscriptions(), now = new Date()): Promise<SubscriptionRow[]> {
   await assertClientAccess(db, actor, clientId);
-  await refreshStale(db, eq(subscriptions.clientId, clientId), p, now);
-  return db.select(cols).from(subscriptions).innerJoin(clients, eq(clients.id, subscriptions.clientId)).where(eq(subscriptions.clientId, clientId)).orderBy(desc(subscriptions.createdAt));
+  const mine = and(inFirm(subscriptions.firmId, actor), eq(subscriptions.clientId, clientId));
+  await refreshStale(db, mine, p, now);
+  return db.select(cols).from(subscriptions).innerJoin(clients, eq(clients.id, subscriptions.clientId)).where(mine).orderBy(desc(subscriptions.createdAt));
 }
 
 export async function listSubscriptions(db: Db, actor: Actor, p: SubscriptionProvider = paypalSubscriptions(), now = new Date()): Promise<SubscriptionRow[]> {
-  const visible = visibleClientsCondition(db, actor);
-  const scope = visible ? inArray(subscriptions.clientId, db.select({ id: clients.id }).from(clients).where(visible)) : undefined;
+  const scope = and(inFirm(subscriptions.firmId, actor), inArray(subscriptions.clientId, db.select({ id: clients.id }).from(clients).where(visibleClientsCondition(db, actor))));
   await refreshStale(db, scope, p, now);
   return db.select(cols).from(subscriptions).innerJoin(clients, eq(clients.id, subscriptions.clientId)).where(scope).orderBy(desc(subscriptions.createdAt)).limit(500);
 }
@@ -213,7 +213,7 @@ export type PortalSubscription = Omit<SubscriptionRow, "clientId" | "clientName"
 
 export async function listPortalSubscriptions(db: Db, actor: Actor, p: SubscriptionProvider = paypalSubscriptions(), now = new Date()): Promise<PortalSubscription[]> {
   if (actor.role !== "client" || !actor.clientId) throw new ForbiddenError();
-  const mine = eq(subscriptions.clientId, actor.clientId);
+  const mine = and(inFirm(subscriptions.firmId, actor), eq(subscriptions.clientId, actor.clientId));
   await refreshStale(db, mine, p, now);
   const { clientId: _c, clientName: _n, ...portalCols } = cols;
   void _c;
@@ -235,7 +235,7 @@ export async function startPortalSubscription(
 ): Promise<string> {
   if (actor.role !== "client" || !actor.clientId) throw new ForbiddenError();
   if (!isUuid(id)) throw new NotFoundError();
-  const [row] = await db.select().from(subscriptions).where(and(eq(subscriptions.id, id), eq(subscriptions.clientId, actor.clientId)));
+  const [row] = await db.select().from(subscriptions).where(and(eq(subscriptions.id, id), inFirm(subscriptions.firmId, actor), eq(subscriptions.clientId, actor.clientId)));
   if (!row) throw new NotFoundError();
   if (row.status !== "pending") throw new ValidationError({ _form: ["This subscription is already set up."] });
   requireConfigured(p);
@@ -253,7 +253,7 @@ export async function startPortalSubscription(
     throw paypalFailure("start the subscription", error);
   }
   if (!snap.approveUrl) throw new ValidationError({ _form: ["PayPal didn’t return a checkout link. Please try again."] });
-  await db.update(subscriptions).set({ paypalSubscriptionId: snap.id, syncedAt: now, updatedAt: now }).where(eq(subscriptions.id, row.id));
-  await recordAudit(db, { actorUserId: actor.userId, action: "subscription.checkout", entityType: "subscription", entityId: row.id, metadata: { clientId: row.clientId } });
+  await db.update(subscriptions).set({ paypalSubscriptionId: snap.id, syncedAt: now, updatedAt: now }).where(and(eq(subscriptions.id, row.id), eq(subscriptions.firmId, row.firmId)));
+  await recordAudit(db, { firmId: row.firmId, actorUserId: actor.userId, action: "subscription.checkout", entityType: "subscription", entityId: row.id, metadata: { clientId: row.clientId } });
   return snap.approveUrl;
 }

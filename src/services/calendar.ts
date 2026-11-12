@@ -6,19 +6,20 @@ import type { Actor } from "@/lib/auth/actor";
 import { ForbiddenError, NotFoundError } from "@/lib/errors";
 import { localDate, zonedLocalToUtc } from "@/lib/time";
 import { appointmentInputSchema, isUuid, parseInput } from "@/lib/validation";
-import { assertActiveStaffUser, assertClientAccess, requireStaff, visibleClientsCondition } from "./access";
+import { assertActiveStaffUser, assertClientAccess, inFirm, requireStaff, visibleClientsCondition } from "./access";
 import { recordAudit } from "./audit";
 
 export async function createAppointment(db: Db, actor: Actor, input: unknown): Promise<Appointment> {
   requireStaff(actor);
   const data = parseInput(appointmentInputSchema, input);
   if (data.clientId) await assertClientAccess(db, actor, data.clientId);
-  await assertActiveStaffUser(db, data.ownerId, "ownerId");
+  await assertActiveStaffUser(db, actor, data.ownerId, "ownerId");
   const startsAt = zonedLocalToUtc(data.startsAt);
   const endsAt = new Date(startsAt.getTime() + data.durationMinutes * 60_000);
   const [appt] = await db
     .insert(appointments)
     .values({
+      firmId: actor.firmId,
       title: data.title,
       clientId: data.clientId ?? null,
       ownerId: data.ownerId,
@@ -30,18 +31,18 @@ export async function createAppointment(db: Db, actor: Actor, input: unknown): P
       createdById: actor.userId,
     })
     .returning();
-  await recordAudit(db, { actorUserId: actor.userId, action: "appointment.create", entityType: "appointment", entityId: appt!.id });
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "appointment.create", entityType: "appointment", entityId: appt!.id });
   return appt!;
 }
 
 export async function cancelAppointment(db: Db, actor: Actor, id: string): Promise<void> {
   requireStaff(actor);
   if (!isUuid(id)) throw new NotFoundError();
-  const [appt] = await db.select().from(appointments).where(eq(appointments.id, id));
+  const [appt] = await db.select().from(appointments).where(and(eq(appointments.id, id), inFirm(appointments.firmId, actor)));
   if (!appt || appt.cancelledAt) throw new NotFoundError();
   if (appt.clientId) await assertClientAccess(db, actor, appt.clientId);
-  await db.update(appointments).set({ cancelledAt: new Date(), updatedAt: new Date() }).where(eq(appointments.id, id));
-  await recordAudit(db, { actorUserId: actor.userId, action: "appointment.cancel", entityType: "appointment", entityId: id });
+  await db.update(appointments).set({ cancelledAt: new Date(), updatedAt: new Date() }).where(and(eq(appointments.id, id), inFirm(appointments.firmId, actor)));
+  await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "appointment.cancel", entityType: "appointment", entityId: id });
 }
 
 export type CalendarItem =
@@ -66,19 +67,19 @@ export async function getCalendar(db: Db, actor: Actor, fromDate: string, toDate
       .from(appointments)
       .leftJoin(clients, eq(clients.id, appointments.clientId))
       .innerJoin(owner, eq(owner.id, appointments.ownerId))
-      .where(and(isNull(appointments.cancelledAt), gte(appointments.startsAt, from), lt(appointments.startsAt, to), or(isNull(appointments.clientId), visible ?? sql`true`)))
+      .where(and(inFirm(appointments.firmId, actor), isNull(appointments.cancelledAt), gte(appointments.startsAt, from), lt(appointments.startsAt, to), or(isNull(appointments.clientId), visible)))
       .orderBy(asc(appointments.startsAt)),
     db
       .select({ id: engagements.id, title: engagements.title, dueDate: engagements.dueDate, clientId: clients.id, clientName: clients.displayName })
       .from(engagements)
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(visible, isNotNull(engagements.dueDate), gte(engagements.dueDate, fromDate), lt(engagements.dueDate, toDate), notInArray(engagements.status, ["completed", "filed"]))),
+      .where(and(inFirm(engagements.firmId, actor), visible, isNotNull(engagements.dueDate), gte(engagements.dueDate, fromDate), lt(engagements.dueDate, toDate), notInArray(engagements.status, ["completed", "filed"]))),
     db
       .select({ id: tasks.id, title: tasks.title, dueDate: tasks.dueDate, engagementId: engagements.id, clientName: clients.displayName })
       .from(tasks)
       .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(visible, eq(tasks.status, "open"), isNotNull(tasks.dueDate), gte(tasks.dueDate, fromDate), lt(tasks.dueDate, toDate))),
+      .where(and(inFirm(tasks.firmId, actor), visible, eq(tasks.status, "open"), isNotNull(tasks.dueDate), gte(tasks.dueDate, fromDate), lt(tasks.dueDate, toDate))),
   ]);
 
   const items: CalendarItem[] = [
@@ -109,7 +110,7 @@ export async function listPortalAppointments(db: Db, actor: Actor, now = new Dat
     .select({ id: appointments.id, title: appointments.title, startsAt: appointments.startsAt, endsAt: appointments.endsAt, kind: appointments.kind, location: appointments.location, withName: users.name })
     .from(appointments)
     .innerJoin(users, eq(users.id, appointments.ownerId))
-    .where(and(eq(appointments.clientId, actor.clientId), isNull(appointments.cancelledAt), ne(appointments.kind, "internal"), gte(appointments.endsAt, now)))
+    .where(and(inFirm(appointments.firmId, actor), eq(appointments.clientId, actor.clientId), isNull(appointments.cancelledAt), ne(appointments.kind, "internal"), gte(appointments.endsAt, now)))
     .orderBy(asc(appointments.startsAt))
     .limit(20);
 }
@@ -122,11 +123,12 @@ export async function countUpcomingAppointments(db: Db, actor: Actor, days = 7, 
     .leftJoin(clients, eq(clients.id, appointments.clientId))
     .where(
       and(
+        inFirm(appointments.firmId, actor),
         isNull(appointments.cancelledAt),
         gte(appointments.startsAt, now),
         lt(appointments.startsAt, new Date(now.getTime() + days * 86_400_000)),
         eq(appointments.ownerId, actor.userId),
-        or(isNull(appointments.clientId), visible ?? sql`true`),
+        or(isNull(appointments.clientId), visible),
       ),
     );
   return row?.n ?? 0;

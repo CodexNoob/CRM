@@ -13,7 +13,7 @@ import {
 } from "@/lib/auth/sessions";
 import { AuthenticationError, ValidationError } from "@/lib/errors";
 import { acceptInvitation, createStaffInvitation, InvalidInvitationError, INVITATION_TTL_MS } from "@/services/users";
-import { createTestDb, createUser, deactivate } from "./helpers";
+import { createTestDb, createUser, deactivate, defaultFirmId } from "./helpers";
 
 const PASSWORD = "correct horse battery staple";
 
@@ -120,6 +120,7 @@ describe("invitations", () => {
   it("lets an invited user set a password once, then sign in", async () => {
     const { token, userId } = await createStaffInvitation(
       h.db,
+      await defaultFirmId(h.db),
       { email: "New.Preparer@Example.test", name: "New Preparer", role: "preparer" },
       null,
     );
@@ -136,7 +137,7 @@ describe("invitations", () => {
   });
 
   it("rejects expired invitations and weak passwords", async () => {
-    const { token } = await createStaffInvitation(h.db, { email: "late@example.test", name: "Late", role: "preparer" }, null);
+    const { token } = await createStaffInvitation(h.db, await defaultFirmId(h.db), { email: "late@example.test", name: "Late", role: "preparer" }, null);
     await expect(acceptInvitation(h.db, token, "short")).rejects.toBeInstanceOf(ValidationError);
     const later = new Date(Date.now() + INVITATION_TTL_MS + 1000);
     await expect(acceptInvitation(h.db, token, PASSWORD, later)).rejects.toBeInstanceOf(InvalidInvitationError);
@@ -145,7 +146,7 @@ describe("invitations", () => {
   it("only admins may invite staff", async () => {
     const preparer = await createUser(h.db, { role: "preparer" });
     await expect(
-      createStaffInvitation(h.db, { email: "x@example.test", name: "X", role: "admin" }, preparer),
+      createStaffInvitation(h.db, preparer.firmId, { email: "x@example.test", name: "X", role: "admin" }, preparer),
     ).rejects.toThrow("permission");
   });
 });
