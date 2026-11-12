@@ -75,6 +75,7 @@ describe("practice-workflow migration (0016) on existing data", () => {
     const counters = await q<{ kind: string; value: number }>("select kind, value from firm_counters order by kind");
     expect(counters).toEqual([
       { kind: "client", value: 1 },
+      { kind: "conversation", value: 1 }, // added by 0020
       { kind: "engagement", value: 1 },
       { kind: "lead", value: 1 },
       { kind: "task", value: 2 },
@@ -84,6 +85,20 @@ describe("practice-workflow migration (0016) on existing data", () => {
   it("adds the engagement manager to the engagement team", async () => {
     const team = await q<{ user_id: string; role: string }>("select user_id, role::text from engagement_team");
     expect(team).toEqual([{ user_id: "22222222-2222-4222-8222-222222222222", role: "manager" }]);
+  });
+});
+
+describe("client-collaboration migration (0020) on existing data", () => {
+  it("moves each client's message thread into a General conversation", async () => {
+    const convs = await q<{ subject: string; client_id: string; conversation_number: number }>("select subject, client_id, conversation_number from conversations");
+    expect(convs).toEqual([{ subject: "General", client_id: "11111111-1111-4111-8111-111111111111", conversation_number: 1 }]);
+    const orphans = await q<{ n: number }>("select count(*)::int n from messages where conversation_id is null");
+    expect(orphans[0]!.n).toBe(0);
+  });
+
+  it("gives existing portal logins access to their own client", async () => {
+    const access = await q<{ user_id: string; client_id: string; role: string; status: string }>("select user_id, client_id, role::text, status::text from portal_client_access");
+    expect(access).toEqual([{ user_id: "33333333-3333-4333-8333-333333333333", client_id: "11111111-1111-4111-8111-111111111111", role: "owner", status: "active" }]);
   });
 });
 

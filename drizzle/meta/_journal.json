@@ -141,6 +141,13 @@
       "when": 1794463964678,
       "tag": "0019_zippy_mockingbird",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794468851090,
+      "tag": "0020_client_collaboration",
+      "breakpoints": true
     }
   ]
 }

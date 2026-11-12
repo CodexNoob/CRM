@@ -6,7 +6,7 @@ import { clients, documents, engagements, users, type DocumentRow } from "@/db/s
 import type { Actor } from "@/lib/auth/actor";
 import { checkFile } from "@/lib/file-rules";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
-import { databaseStorage, noScanner, type FileStorage, type MalwareScanner } from "@/lib/storage";
+import { defaultStorage, noScanner, storageFor, type FileStorage, type MalwareScanner } from "@/lib/storage";
 import { isUuid } from "@/lib/validation";
 import { assertClientAccess, inFirm, requireWriter, visibleClientsCondition } from "./access";
 import { recordAudit } from "./audit";
@@ -52,7 +52,7 @@ export async function uploadDocument(
   deps: DocumentDeps = {},
 ): Promise<DocumentRow> {
   if (actor.role !== "client") requireWriter(actor);
-  const storage = deps.storage ?? databaseStorage(db);
+  const storage = deps.storage ?? defaultStorage(db);
   const scanner = deps.scanner ?? noScanner;
   await resolveUploadTarget(db, actor, input.clientId, input.engagementId);
   const { fileName, contentType } = checkFile(input.fileName, input.data);
@@ -63,7 +63,7 @@ export async function uploadDocument(
   }
 
   const storageKey = randomUUID();
-  await storage.put(storageKey, input.data);
+  await storage.put(storageKey, input.data, contentType);
   const isClient = actor.role === "client";
   const [doc] = await db
     .insert(documents)
@@ -77,6 +77,7 @@ export async function uploadDocument(
       sizeBytes: input.data.length,
       sha256: createHash("sha256").update(input.data).digest("hex"),
       storageKey,
+      storageProvider: storage.provider,
       uploadedById: actor.userId,
       uploadedByClient: isClient,
       // Clients always see what they uploaded; staff choose per file.
@@ -181,7 +182,7 @@ export async function getDocumentForDownload(
 ): Promise<{ doc: DocumentRow; data: Buffer }> {
   const doc = await loadAccessibleDocument(db, actor, id);
   if (doc.scanStatus === "infected") throw new NotFoundError();
-  const data = await (deps.storage ?? databaseStorage(db)).get(doc.storageKey);
+  const data = await (deps.storage ?? storageFor(db, doc.storageProvider)).get(doc.storageKey);
   if (!data) throw new NotFoundError();
   await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "document.download", entityType: "document", entityId: doc.id });
   return { doc, data };

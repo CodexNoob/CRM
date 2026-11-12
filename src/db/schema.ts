@@ -443,6 +443,25 @@ export const leads = pgTable(
 ).enableRLS();
 
 export const scanStatus = pgEnum("scan_status", ["not_scanned", "pending", "clean", "infected"]);
+export const documentCategory = pgEnum("document_category", [
+  "tax_documents",
+  "income_statements",
+  "bank_statements",
+  "financial_reports",
+  "expense_receipts",
+  "invoices",
+  "contracts",
+  "engagement_letters",
+  "tax_returns",
+  "identity_documents",
+  "payroll_documents",
+  "bookkeeping_records",
+  "other",
+]);
+/** requested is used by placeholder rows only; uploads start at uploaded / under_review — never verified. */
+export const documentStatus = pgEnum("document_status", ["requested", "uploaded", "under_review", "verified", "rejected", "replacement_requested", "archived"]);
+/** internal_only: staff only (default). client_visible: the client sees it in the portal. shared_with_client: staff deliberately sent it. */
+export const documentVisibility = pgEnum("document_visibility", ["internal_only", "client_visible", "shared_with_client"]);
 
 /** Document metadata. The bytes live in `document_blobs` (or external storage) so listings never load file contents. */
 export const documents = pgTable(
@@ -463,19 +482,60 @@ export const documents = pgTable(
     storageKey: text("storage_key").notNull(),
     uploadedById: uuid("uploaded_by_id").references(() => users.id, { onDelete: "set null" }),
     uploadedByClient: boolean("uploaded_by_client").notNull().default(false),
+    /** Kept in sync with `visibility` (true unless internal_only) for older queries. */
     visibleToClient: boolean("visible_to_client").notNull().default(false),
     scanStatus: scanStatus("scan_status").notNull().default("not_scanned"),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /* ── Document management (collaboration) ── */
+    /** Per-firm sequence shown as D-0001 (shared by every version of one document). */
+    documentNumber: integer("document_number"),
+    /** Display name chosen by staff; defaults to the original file name. */
+    title: text("title"),
+    category: documentCategory("category").notNull().default("other"),
+    status: documentStatus("status").notNull().default("uploaded"),
+    visibility: documentVisibility("visibility").notNull().default("internal_only"),
+    versionNumber: integer("version_number").notNull().default(1),
+    /** First version of this document (null on the first version itself). */
+    rootDocumentId: uuid("root_document_id"),
+    /** The version this one replaced. */
+    previousVersionId: uuid("previous_version_id"),
+    /** False once a newer version exists. */
+    isCurrentVersion: boolean("is_current_version").notNull().default(true),
+    taxPreparationCaseId: uuid("tax_preparation_case_id"),
+    taxReturnId: uuid("tax_return_id"),
+    documentRequestItemId: uuid("document_request_item_id"),
+    reviewedById: uuid("reviewed_by_id").references(() => users.id, { onDelete: "set null" }),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    /** Shown to the client when a replacement is requested. */
+    reviewNote: text("review_note"),
+    expirationDate: date("expiration_date", { mode: "string" }),
+    description: text("description"),
+    /** Staff-only. Never returned by portal queries. */
+    internalNotes: text("internal_notes"),
+    /** Tax year the document relates to (for filtering). */
+    taxYear: integer("tax_year"),
+    /** "database" (document_blobs) or "supabase" (private bucket). */
+    storageProvider: text("storage_provider").notNull().default("database"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [
+  (t): PgTableExtraConfigValue[] => [
     index("documents_client_idx").on(t.clientId),
+    index("documents_root_idx").on(t.rootDocumentId),
+    index("documents_firm_status_idx").on(t.firmId, t.status),
+    uniqueIndex("documents_firm_number_version_unique").on(t.firmId, t.documentNumber, t.versionNumber),
     index("documents_engagement_idx").on(t.engagementId),
     index("documents_firm_idx").on(t.firmId),
     unique("documents_firm_id_id_unique").on(t.firmId, t.id),
     foreignKey({ name: "documents_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
     foreignKey({ name: "documents_firm_engagement_fk", columns: [t.firmId, t.engagementId], foreignColumns: [engagements.firmId, engagements.id] }),
     foreignKey({ name: "documents_firm_task_fk", columns: [t.firmId, t.taskId], foreignColumns: [tasks.firmId, tasks.id] }),
+    // Tables defined further down (resolved lazily; typed loosely to avoid inference cycles).
+    foreignKey({ name: "documents_firm_tax_case_fk", columns: [t.firmId, t.taxPreparationCaseId], foreignColumns: [taxPreparationCases.firmId as AnyPgColumn, taxPreparationCases.id as AnyPgColumn] }),
+    foreignKey({ name: "documents_firm_tax_return_fk", columns: [t.firmId, t.taxReturnId], foreignColumns: [taxReturns.firmId as AnyPgColumn, taxReturns.id as AnyPgColumn] }),
+    foreignKey({ name: "documents_firm_request_item_fk", columns: [t.firmId, t.documentRequestItemId], foreignColumns: [documentRequestItems.firmId as AnyPgColumn, documentRequestItems.id as AnyPgColumn] }),
+    foreignKey({ name: "documents_firm_root_fk", columns: [t.firmId, t.rootDocumentId], foreignColumns: [t.firmId, t.id] }),
+    foreignKey({ name: "documents_firm_previous_fk", columns: [t.firmId, t.previousVersionId], foreignColumns: [t.firmId, t.id] }),
     index("documents_task_idx").on(t.taskId),
   ],
 ).enableRLS();
@@ -492,7 +552,55 @@ export const documentBlobs = pgTable("document_blobs", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }).enableRLS();
 
-/** One conversation per client between the firm and the client's portal users. */
+export const conversationCategory = pgEnum("conversation_category", [
+  "general_inquiry",
+  "document_request",
+  "tax_preparation",
+  "tax_return",
+  "bookkeeping",
+  "billing",
+  "appointment",
+  "engagement",
+  "other",
+]);
+export const conversationStatus = pgEnum("conversation_status", ["open", "waiting_for_client", "waiting_for_staff", "in_progress", "resolved", "closed"]);
+
+/** A conversation between the firm and one client (many per client). */
+export const conversations = pgTable(
+  "conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "restrict" }),
+    conversationNumber: integer("conversation_number"),
+    subject: text("subject").notNull(),
+    category: conversationCategory("category").notNull().default("general_inquiry"),
+    status: conversationStatus("status").notNull().default("open"),
+    priority: priority("priority").notNull().default("normal"),
+    engagementId: uuid("engagement_id").references(() => engagements.id, { onDelete: "set null" }),
+    taxReturnId: uuid("tax_return_id"),
+    assignedStaffId: uuid("assigned_staff_id").references(() => users.id, { onDelete: "set null" }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    /** Last client-visible message (drives the inbox order). */
+    lastMessageAt: timestamp("last_message_at", { withTimezone: true }).notNull().defaultNow(),
+    ...timestamps,
+  },
+  (t): PgTableExtraConfigValue[] => [
+    index("conversations_client_idx").on(t.clientId, t.lastMessageAt),
+    index("conversations_firm_status_idx").on(t.firmId, t.status, t.lastMessageAt),
+    index("conversations_assigned_idx").on(t.assignedStaffId),
+    uniqueIndex("conversations_firm_number_unique").on(t.firmId, t.conversationNumber),
+    unique("conversations_firm_id_id_unique").on(t.firmId, t.id),
+    foreignKey({ name: "conversations_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+    foreignKey({ name: "conversations_firm_engagement_fk", columns: [t.firmId, t.engagementId], foreignColumns: [engagements.firmId, engagements.id] }),
+    foreignKey({ name: "conversations_firm_assignee_fk", columns: [t.firmId, t.assignedStaffId], foreignColumns: [users.firmId, users.id] }),
+    foreignKey({ name: "conversations_firm_tax_return_fk", columns: [t.firmId, t.taxReturnId], foreignColumns: [taxReturns.firmId as AnyPgColumn, taxReturns.id as AnyPgColumn] }),
+  ],
+).enableRLS();
+
+/** Messages within a conversation. Internal notes are staff-only and never returned to portal users. */
 export const messages = pgTable(
   "messages",
   {
@@ -501,17 +609,26 @@ export const messages = pgTable(
     clientId: uuid("client_id")
       .notNull()
       .references(() => clients.id, { onDelete: "restrict" }),
+    conversationId: uuid("conversation_id").references(() => conversations.id, { onDelete: "cascade" }),
     authorId: uuid("author_id").references(() => users.id, { onDelete: "set null" }),
     fromClient: boolean("from_client").notNull(),
     body: text("body").notNull(),
+    /** Staff-only note inside a conversation. */
+    isInternal: boolean("is_internal").notNull().default(false),
+    /** "message" | "internal_note" | "system" */
+    messageType: text("message_type").notNull().default("message"),
     /** When the other side (staff for client messages, the client for staff messages) first read it. */
     readAt: timestamp("read_at", { withTimezone: true }),
+    editedAt: timestamp("edited_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("messages_client_idx").on(t.clientId, t.createdAt),
+    index("messages_conversation_idx").on(t.conversationId, t.createdAt),
     index("messages_firm_idx").on(t.firmId),
+    unique("messages_firm_id_id_unique").on(t.firmId, t.id),
     foreignKey({ name: "messages_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+    foreignKey({ name: "messages_firm_conversation_fk", columns: [t.firmId, t.conversationId], foreignColumns: [conversations.firmId, conversations.id] }),
   ],
 ).enableRLS();
 
@@ -1088,7 +1205,276 @@ export const taxReturnHistory = pgTable(
   ],
 ).enableRLS();
 
+/* ───────────────────────── Client collaboration: requests, attachments, reads, signatures, portal access ───────────────────────── */
+
+export const documentRequestStatus = pgEnum("document_request_status", ["draft", "sent", "partially_fulfilled", "fulfilled", "overdue", "cancelled"]);
+export const documentRequestItemStatus = pgEnum("document_request_item_status", ["pending", "uploaded", "under_review", "verified", "rejected", "replacement_requested", "waived"]);
+
+/** A request for one or more documents from a client (e.g. "2026 tax documents"). */
+export const documentRequests = pgTable(
+  "document_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "restrict" }),
+    requestNumber: integer("request_number"),
+    engagementId: uuid("engagement_id").references(() => engagements.id, { onDelete: "set null" }),
+    taxPreparationCaseId: uuid("tax_preparation_case_id"),
+    title: text("title").notNull(),
+    description: text("description"),
+    status: documentRequestStatus("status").notNull().default("draft"),
+    dueDate: date("due_date", { mode: "string" }),
+    requestedById: uuid("requested_by_id").references(() => users.id, { onDelete: "set null" }),
+    assignedContactId: uuid("assigned_contact_id").references(() => clientContacts.id, { onDelete: "set null" }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    index("document_requests_client_idx").on(t.clientId, t.status),
+    uniqueIndex("document_requests_firm_number_unique").on(t.firmId, t.requestNumber),
+    unique("document_requests_firm_id_id_unique").on(t.firmId, t.id),
+    foreignKey({ name: "document_requests_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+    foreignKey({ name: "document_requests_firm_engagement_fk", columns: [t.firmId, t.engagementId], foreignColumns: [engagements.firmId, engagements.id] }),
+    foreignKey({ name: "document_requests_firm_tax_case_fk", columns: [t.firmId, t.taxPreparationCaseId], foreignColumns: [taxPreparationCases.firmId, taxPreparationCases.id] }),
+  ],
+).enableRLS();
+
+/** One requested document within a request; fulfilled by an uploaded document. */
+export const documentRequestItems = pgTable(
+  "document_request_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => documentRequests.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    category: documentCategory("category").notNull().default("other"),
+    required: boolean("required").notNull().default(true),
+    status: documentRequestItemStatus("status").notNull().default("pending"),
+    /** The current document that satisfies this item (latest version). */
+    fulfilledDocumentId: uuid("fulfilled_document_id").references((): AnyPgColumn => documents.id, { onDelete: "set null" }),
+    sequence: integer("sequence").notNull().default(0),
+    ...timestamps,
+  },
+  (t) => [
+    index("document_request_items_request_idx").on(t.requestId),
+    unique("document_request_items_firm_id_id_unique").on(t.firmId, t.id),
+    foreignKey({ name: "document_request_items_firm_request_fk", columns: [t.firmId, t.requestId], foreignColumns: [documentRequests.firmId, documentRequests.id] }),
+  ],
+).enableRLS();
+
+/** Files attached to a message (the bytes live once, as a document). */
+export const messageAttachments = pgTable(
+  "message_attachments",
+  {
+    firmId: firmId(),
+    messageId: uuid("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.messageId, t.documentId] }),
+    foreignKey({ name: "message_attachments_firm_message_fk", columns: [t.firmId, t.messageId], foreignColumns: [messages.firmId, messages.id] }),
+    foreignKey({ name: "message_attachments_firm_document_fk", columns: [t.firmId, t.documentId], foreignColumns: [documents.firmId, documents.id] }),
+  ],
+).enableRLS();
+
+/** Per-person read position in a conversation (unread counts for every staff member and portal user). */
+export const conversationReads = pgTable(
+  "conversation_reads",
+  {
+    firmId: firmId(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    lastReadAt: timestamp("last_read_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.conversationId, t.userId] }),
+    foreignKey({ name: "conversation_reads_firm_conversation_fk", columns: [t.firmId, t.conversationId], foreignColumns: [conversations.firmId, conversations.id] }),
+  ],
+).enableRLS();
+
+export const portalAccessRole = pgEnum("portal_access_role", ["owner", "contact", "viewer"]);
+export const portalAccessStatus = pgEnum("portal_access_status", ["active", "suspended"]);
+
+/**
+ * Which client records a portal login may access (business clients can have several contacts;
+ * one person can be a contact for several clients). The ONLY source of portal authorization —
+ * a client id sent by the browser is never trusted.
+ */
+export const portalClientAccess = pgTable(
+  "portal_client_access",
+  {
+    firmId: firmId(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    role: portalAccessRole("role").notNull().default("contact"),
+    status: portalAccessStatus("status").notNull().default("active"),
+    contactId: uuid("contact_id").references(() => clientContacts.id, { onDelete: "set null" }),
+    grantedById: uuid("granted_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.clientId] }),
+    index("portal_client_access_client_idx").on(t.clientId),
+    foreignKey({ name: "portal_client_access_firm_user_fk", columns: [t.firmId, t.userId], foreignColumns: [users.firmId, users.id] }),
+    foreignKey({ name: "portal_client_access_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+  ],
+).enableRLS();
+
+/** In-app notifications for portal users (never implies an email was sent). */
+export const clientNotifications = pgTable(
+  "client_notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    type: text("type").notNull(), // "message" | "document_request" | "document_shared" | "signature_request" | "invoice"
+    title: text("title").notNull(),
+    href: text("href"),
+    /** Prevents duplicate notifications for the same event. */
+    dedupeKey: text("dedupe_key").notNull(),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("client_notifications_dedupe_unique").on(t.userId, t.dedupeKey),
+    index("client_notifications_user_idx").on(t.userId, t.readAt, t.createdAt),
+    foreignKey({ name: "client_notifications_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+  ],
+).enableRLS();
+
+export const signatureStatus = pgEnum("signature_status", ["draft", "sent", "viewed", "partially_signed", "signed", "declined", "expired", "voided", "failed"]);
+export const signerStatus = pgEnum("signer_status", ["pending", "sent", "viewed", "signed", "declined"]);
+export const signatureDocumentType = pgEnum("signature_document_type", [
+  "engagement_letter",
+  "service_agreement",
+  "tax_filing_authorization",
+  "client_consent",
+  "disclosure",
+  "financial_information_authorization",
+  "other",
+]);
+
+/** An e-signature request sent through a real provider (Dropbox Sign). Status only changes from verified provider events. */
+export const signatureRequests = pgTable(
+  "signature_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "restrict" }),
+    requestNumber: integer("request_number"),
+    engagementId: uuid("engagement_id").references(() => engagements.id, { onDelete: "set null" }),
+    taxReturnId: uuid("tax_return_id"),
+    /** The document sent for signature. */
+    documentId: uuid("document_id").references(() => documents.id, { onDelete: "restrict" }),
+    /** The signed copy retrieved from the provider. */
+    signedDocumentId: uuid("signed_document_id").references(() => documents.id, { onDelete: "set null" }),
+    documentType: signatureDocumentType("document_type").notNull().default("other"),
+    provider: text("provider").notNull(),
+    providerRequestId: text("provider_request_id"),
+    /** Provider test mode (no legal effect). */
+    testMode: boolean("test_mode").notNull().default(true),
+    title: text("title").notNull(),
+    message: text("message"),
+    status: signatureStatus("status").notNull().default("draft"),
+    sentById: uuid("sent_by_id").references(() => users.id, { onDelete: "set null" }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    failureReason: text("failure_reason"),
+    ...timestamps,
+  },
+  (t) => [
+    index("signature_requests_client_idx").on(t.clientId),
+    uniqueIndex("signature_requests_provider_id_unique").on(t.provider, t.providerRequestId),
+    uniqueIndex("signature_requests_firm_number_unique").on(t.firmId, t.requestNumber),
+    unique("signature_requests_firm_id_id_unique").on(t.firmId, t.id),
+    foreignKey({ name: "signature_requests_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+    foreignKey({ name: "signature_requests_firm_engagement_fk", columns: [t.firmId, t.engagementId], foreignColumns: [engagements.firmId, engagements.id] }),
+    foreignKey({ name: "signature_requests_firm_document_fk", columns: [t.firmId, t.documentId], foreignColumns: [documents.firmId, documents.id] }),
+    foreignKey({ name: "signature_requests_firm_tax_return_fk", columns: [t.firmId, t.taxReturnId], foreignColumns: [taxReturns.firmId, taxReturns.id] }),
+  ],
+).enableRLS();
+
+export const signatureSigners = pgTable(
+  "signature_signers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    firmId: firmId(),
+    signatureRequestId: uuid("signature_request_id")
+      .notNull()
+      .references(() => signatureRequests.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    role: text("role"),
+    signingOrder: integer("signing_order").notNull().default(1),
+    status: signerStatus("status").notNull().default("pending"),
+    /** Provider's id for this signer (signature_id in Dropbox Sign). */
+    providerSignerId: text("provider_signer_id"),
+    /** A portal user who may open this signer's session (resolved on the server). */
+    portalUserId: uuid("portal_user_id").references(() => users.id, { onDelete: "set null" }),
+    viewedAt: timestamp("viewed_at", { withTimezone: true }),
+    signedAt: timestamp("signed_at", { withTimezone: true }),
+    declinedAt: timestamp("declined_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    index("signature_signers_request_idx").on(t.signatureRequestId),
+    foreignKey({ name: "signature_signers_firm_request_fk", columns: [t.firmId, t.signatureRequestId], foreignColumns: [signatureRequests.firmId, signatureRequests.id] }),
+  ],
+).enableRLS();
+
+/** Verified provider webhook events, stored once each (idempotency + signing audit trail). */
+export const signatureEvents = pgTable(
+  "signature_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    firmId: uuid("firm_id").references(() => firms.id, { onDelete: "restrict" }),
+    provider: text("provider").notNull(),
+    /** Provider's unique event identity (hash), used to ignore duplicate deliveries. */
+    providerEventKey: text("provider_event_key").notNull(),
+    eventType: text("event_type").notNull(),
+    providerRequestId: text("provider_request_id"),
+    signatureRequestId: uuid("signature_request_id").references(() => signatureRequests.id, { onDelete: "set null" }),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }),
+    /** Minimal, non-sensitive event fields (no document contents). */
+    payload: jsonb("payload").$type<Record<string, unknown>>(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("signature_events_provider_key_unique").on(t.provider, t.providerEventKey), index("signature_events_request_idx").on(t.signatureRequestId)],
+).enableRLS();
+
 export type User = typeof users.$inferSelect;
+export type DocumentCategory = (typeof documentCategory.enumValues)[number];
+export type DocumentStatus = (typeof documentStatus.enumValues)[number];
+export type DocumentVisibility = (typeof documentVisibility.enumValues)[number];
+export type ConversationStatus = (typeof conversationStatus.enumValues)[number];
+export type ConversationCategory = (typeof conversationCategory.enumValues)[number];
+export type SignatureStatus = (typeof signatureStatus.enumValues)[number];
 export type Firm = typeof firms.$inferSelect;
 export type FirmStatus = (typeof firmStatus.enumValues)[number];
 export type Subscription = typeof subscriptions.$inferSelect;
