@@ -39,10 +39,10 @@ const missing = () => expect.objectContaining({}) && NotFoundError;
 beforeAll(async () => {
   h = await createTestDb();
   adminA = await createUser(h.db, { role: "admin", name: "Ada A" });
-  prepA = await createUser(h.db, { role: "preparer", name: "Pat A" });
+  prepA = await createUser(h.db, { role: "employee", name: "Pat A" });
   firmB = await createTestFirm(h.db, "Firm B");
   adminB = await createUser(h.db, { role: "admin", name: "Bea B", firmId: firmB });
-  prepB = await createUser(h.db, { role: "preparer", name: "Pip B", firmId: firmB });
+  prepB = await createUser(h.db, { role: "employee", name: "Pip B", firmId: firmB });
 
   const a = await createClientWithPortalUser(h.db, adminA, "Alpha Client");
   A.client = a.client.id;

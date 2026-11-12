@@ -7,7 +7,7 @@ import type { EngagementStatus, ServiceType } from "@/db/schema";
 import { CellTitle, DataTable, type BulkAction } from "@/components/data-table";
 import { Badge } from "@/components/ui";
 import { formatDate, SERVICE_LABELS, STATUS_LABELS } from "@/lib/labels";
-import { dueLabel, ENGAGEMENT_TONE } from "@/lib/status";
+import { dueLabel, ENGAGEMENT_TONE, ENGAGEMENT_DONE } from "@/lib/status";
 
 export interface EngagementRow {
   id: string;
@@ -22,7 +22,7 @@ export interface EngagementRow {
   openTasks: number;
 }
 
-const DONE: EngagementStatus[] = ["filed", "completed"];
+const DONE: EngagementStatus[] = [...ENGAGEMENT_DONE];
 
 export function EngagementsTable({
   rows,

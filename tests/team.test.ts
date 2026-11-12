@@ -24,22 +24,22 @@ describe("team management", () => {
 
   it("is admin-only for every operation", async () => {
     const admin = await createUser(h.db, { role: "admin" });
-    for (const role of ["partner", "preparer", "client"] as const) {
+    for (const role of ["manager", "employee", "client"] as const) {
       const actor = await createUser(h.db, { role });
       await expect(listTeam(h.db, actor)).rejects.toBeInstanceOf(ForbiddenError);
       await expect(inviteStaff(h.db, actor, { name: "X", email: `x-${role}@example.test`, role: "admin" })).rejects.toBeInstanceOf(ForbiddenError);
       await expect(sendStaffSignInLink(h.db, actor, admin.userId)).rejects.toBeInstanceOf(ForbiddenError);
       await expect(setStaffActive(h.db, actor, admin.userId, false)).rejects.toBeInstanceOf(ForbiddenError);
-      await expect(changeStaffRole(h.db, actor, admin.userId, "preparer")).rejects.toBeInstanceOf(ForbiddenError);
+      await expect(changeStaffRole(h.db, actor, admin.userId, "employee")).rejects.toBeInstanceOf(ForbiddenError);
     }
   });
 
   it("invites staff who can then set a password and sign in", async () => {
     const admin = await createUser(h.db, { role: "admin" });
-    const { token } = await inviteStaff(h.db, admin, { name: "Pat New", email: "Pat.New@Example.test", role: "preparer" });
-    expect((await listTeam(h.db, admin)).find((m) => m.email === "pat.new@example.test")).toMatchObject({ role: "preparer", hasPassword: false });
+    const { token } = await inviteStaff(h.db, admin, { name: "Pat New", email: "Pat.New@Example.test", role: "employee" });
+    expect((await listTeam(h.db, admin)).find((m) => m.email === "pat.new@example.test")).toMatchObject({ role: "employee", hasPassword: false });
     await acceptInvitation(h.db, token, PASSWORD);
-    expect((await login(h.db, { email: "pat.new@example.test", password: PASSWORD })).actor.role).toBe("preparer");
+    expect((await login(h.db, { email: "pat.new@example.test", password: PASSWORD })).actor.role).toBe("employee");
 
     const dup = await inviteStaff(h.db, admin, { name: "Again", email: "pat.new@example.test", role: "admin" }).catch((e) => e);
     expect(dup).toBeInstanceOf(ValidationError);
@@ -58,7 +58,7 @@ describe("team management", () => {
 
   it("deactivation signs the person out and blocks sign-in until reactivated", async () => {
     const admin = await createUser(h.db, { role: "admin" });
-    const staff = await createUser(h.db, { role: "preparer", password: PASSWORD });
+    const staff = await createUser(h.db, { role: "employee", password: PASSWORD });
     const { token } = await createSession(h.db, staff.userId);
     await setStaffActive(h.db, admin, staff.userId, false);
     expect(await validateSessionToken(h.db, token)).toBeNull();
@@ -73,13 +73,13 @@ describe("team management", () => {
     try {
       const soleAdmin = await createUser(h2.db, { role: "admin" });
       await expect(setStaffActive(h2.db, soleAdmin, soleAdmin.userId, false)).rejects.toBeInstanceOf(ValidationError);
-      await expect(changeStaffRole(h2.db, soleAdmin, soleAdmin.userId, "preparer")).rejects.toBeInstanceOf(ValidationError);
+      await expect(changeStaffRole(h2.db, soleAdmin, soleAdmin.userId, "employee")).rejects.toBeInstanceOf(ValidationError);
 
       const second = await createUser(h2.db, { role: "admin" });
       // With two admins, one may demote the other — leaving exactly one.
-      await changeStaffRole(h2.db, soleAdmin, second.userId, "partner");
+      await changeStaffRole(h2.db, soleAdmin, second.userId, "manager");
       // The remaining admin cannot be removed by a (now non-admin) colleague either.
-      await expect(setStaffActive(h2.db, { ...second, role: "partner" }, soleAdmin.userId, false)).rejects.toBeInstanceOf(ForbiddenError);
+      await expect(setStaffActive(h2.db, { ...second, role: "manager" }, soleAdmin.userId, false)).rejects.toBeInstanceOf(ForbiddenError);
     } finally {
       await h2.close();
     }
@@ -87,12 +87,12 @@ describe("team management", () => {
 
   it("role changes take effect immediately by ending existing sessions", async () => {
     const admin = await createUser(h.db, { role: "admin" });
-    const staff = await createUser(h.db, { role: "partner", password: PASSWORD });
+    const staff = await createUser(h.db, { role: "manager", password: PASSWORD });
     const { token } = await createSession(h.db, staff.userId);
-    await changeStaffRole(h.db, admin, staff.userId, "preparer");
+    await changeStaffRole(h.db, admin, staff.userId, "employee");
     expect(await validateSessionToken(h.db, token)).toBeNull();
     const [row] = await h.db.select().from(users).where(eq(users.id, staff.userId));
-    expect(row!.role).toBe("preparer");
+    expect(row!.role).toBe("employee");
   });
 });
 

@@ -82,7 +82,7 @@ describe("clients", () => {
 describe("engagements and tasks", () => {
   it("creates an engagement with owner, due date and status, then tasks", async () => {
     const admin = await createUser(h.db, { role: "admin" });
-    const preparer = await createUser(h.db, { role: "preparer", name: "Pat Preparer" });
+    const preparer = await createUser(h.db, { role: "employee", name: "Pat Preparer" });
     const client = await createClient(h.db, admin, { type: "individual", displayName: "Jordan Lee" });
 
     const engagement = await createEngagement(h.db, admin, client.id, {
@@ -124,7 +124,7 @@ describe("engagements and tasks", () => {
     expect(updated.status).toBe("in_progress");
 
     const done = await setTaskStatus(h.db, preparer, staffTask.id, "done");
-    expect(done.status).toBe("done");
+    expect(done.status).toBe("completed");
     expect(done.completedById).toBe(preparer.userId);
     expect((await listClientEngagements(h.db, admin, client.id))[0]!.openTaskCount).toBe(1);
   });

@@ -38,7 +38,7 @@ export async function listWork(db: Db, actor: Actor, opts: { services: ServiceTy
       clientId: clients.id,
       clientName: clients.displayName,
       ownerName: owner.name,
-      openTasks: sql<number>`(select count(*)::int from tasks t where t.engagement_id = ${engagements.id} and t.firm_id = ${engagements.firmId} and t.status = 'open')`,
+      openTasks: sql<number>`(select count(*)::int from tasks t where t.engagement_id = ${engagements.id} and t.firm_id = ${engagements.firmId} and t.status in ('todo','in_progress','waiting_client','waiting_review','blocked'))`,
       updatedAt: engagements.updatedAt,
     })
     .from(engagements)
@@ -126,7 +126,7 @@ export async function getPracticeReport(db: Db, actor: Actor, now = new Date()):
   const visible = visibleClientsCondition(db, actor);
   const since = new Date(now.getTime() - 30 * 86_400_000);
   const n = sql<number>`count(*)::int`;
-  const done = sql<boolean>`${engagements.status} in ('filed', 'completed')`;
+  const done = sql<boolean>`${engagements.status} in ('filed', 'completed', 'cancelled', 'closed')`;
   const engFirm = inFirm(engagements.firmId, actor);
 
   const [byServiceRows, byStatus, leadRows, sourceRows, newClients, docs, msgs, completed] = await Promise.all([

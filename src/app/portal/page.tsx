@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { TASK_OPEN } from "@/lib/status";
 import { getDb } from "@/db";
 import { Badge, Card, EmptyState, PageHeader } from "@/components/ui";
 import { requireClientActor } from "@/lib/auth/current";
@@ -14,7 +15,7 @@ export const metadata: Metadata = { title: "Your work" };
 export default async function PortalHome() {
   const actor = await requireClientActor();
   const [overview, appts] = await Promise.all([getPortalOverview(getDb(), actor), listPortalAppointments(getDb(), actor)]);
-  const openTasks = overview.engagements.reduce((n, e) => n + e.tasks.filter((t) => t.status === "open").length, 0);
+  const openTasks = overview.engagements.reduce((n, e) => n + e.tasks.filter((t) => TASK_OPEN.includes(t.status)).length, 0);
 
   return (
     <>
@@ -71,10 +72,10 @@ export default async function PortalHome() {
                     {e.tasks.map((t) => (
                       <li key={t.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
-                          <p className={t.status === "done" ? "text-sm text-muted line-through" : "text-sm"}>{t.title}</p>
+                          <p className={t.status === "completed" ? "text-sm text-muted line-through" : "text-sm"}>{t.title}</p>
                           {t.dueDate ? <p className="text-xs text-muted">Due {formatDate(t.dueDate)}</p> : null}
                         </div>
-                        {t.status === "done" ? <Badge tone="good">Done</Badge> : <CompleteTaskButton taskId={t.id} />}
+                        {t.status === "completed" ? <Badge tone="good">Done</Badge> : <CompleteTaskButton taskId={t.id} />}
                       </li>
                     ))}
                   </ul>

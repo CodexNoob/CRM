@@ -3,7 +3,7 @@ import type { Db } from "@/db";
 import { clients, engagements, invoices, type Invoice, type InvoiceStatus } from "@/db/schema";
 import * as paypal from "@/integrations/paypal";
 import type { PayPalInvoiceSnapshot, PayPalInvoiceStatus } from "@/integrations/paypal";
-import { seesAllClients, type Actor } from "@/lib/auth/actor";
+import { isManagerOrAdmin, type Actor } from "@/lib/auth/actor";
 import { AppError, ForbiddenError, IntegrationNotConfiguredError, NotFoundError, ValidationError } from "@/lib/errors";
 import { isUuid, parseInvoiceInput } from "@/lib/validation";
 import { assertClientAccess, inFirm, requireStaff, visibleClientsCondition } from "./access";
@@ -84,7 +84,7 @@ export function paypalFailure(what: string, error: unknown): AppError {
 /** Admins and partners handle billing corrections; preparers can create and send. */
 function requireBillingManager(actor: Actor) {
   requireStaff(actor);
-  if (!seesAllClients(actor)) throw new ForbiddenError("Only an admin or partner can cancel invoices.");
+  if (!isManagerOrAdmin(actor)) throw new ForbiddenError("Only an admin or manager can cancel invoices.");
 }
 
 async function loadForStaff(db: Db, actor: Actor, id: string): Promise<Invoice> {

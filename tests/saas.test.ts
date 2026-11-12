@@ -123,7 +123,7 @@ describe("subscribing to the software", () => {
   });
 
   it("only a firm admin can start checkout; PayPal must be connected", async () => {
-    const preparer = await createUser(h.db, { role: "preparer", firmId: admin.firmId });
+    const preparer = await createUser(h.db, { role: "employee", firmId: admin.firmId });
     await expect(startFirmCheckout(h.db, preparer, "month", urls, pp.p)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(startFirmCheckout(h.db, admin, "weekly", urls, pp.p)).rejects.toBeInstanceOf(ValidationError);
     pp.state.configured = false;

@@ -19,7 +19,7 @@ export interface TeamMember {
   id: string;
   name: string;
   email: string;
-  role: "admin" | "partner" | "preparer";
+  role: "admin" | "manager" | "employee";
   isActive: boolean;
   hasPassword: boolean;
   createdAt: Date;

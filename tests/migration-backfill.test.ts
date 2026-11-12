@@ -31,6 +31,9 @@ beforeAll(async () => {
     insert into client_assignments (client_id, user_id) values ('11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222');
     insert into engagements (id, client_id, title, service_type, owner_id) values ('44444444-4444-4444-8444-444444444444', '11111111-1111-4111-8111-111111111111', '1040', 'individual_tax', '22222222-2222-4222-8222-222222222222');
     insert into tasks (engagement_id, title, assignee_id) values ('44444444-4444-4444-8444-444444444444', 'Collect W-2', '22222222-2222-4222-8222-222222222222');
+    insert into tasks (engagement_id, title, status) values ('44444444-4444-4444-8444-444444444444', 'Done already', 'done');
+    insert into users (id, email, name, role) values ('66666666-6666-4666-8666-666666666666', 'partner@example.test', 'Pat Partner', 'partner');
+    insert into users (id, email, name, role) values ('77777777-7777-4777-8777-777777777777', 'prep@example.test', 'Pip Preparer', 'preparer');
     insert into leads (name, source) values ('Website visitor', 'website');
     insert into messages (client_id, from_client, body) values ('11111111-1111-4111-8111-111111111111', true, 'Hello');
     insert into announcements (title, body, published_on) values ('Open', 'We are open', '2026-01-01');
@@ -43,6 +46,43 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await pg.close();
+});
+
+describe("practice-workflow migration (0016) on existing data", () => {
+  it("renames roles without losing access", async () => {
+    const roles = await q<{ email: string; role: string }>("select email, role::text from users order by email");
+    expect(roles).toEqual([
+      { email: "admin@example.test", role: "admin" },
+      { email: "client@example.test", role: "client" },
+      { email: "partner@example.test", role: "manager" },
+      { email: "prep@example.test", role: "employee" },
+    ]);
+  });
+
+  it("maps task statuses and links tasks to their engagement's client", async () => {
+    const tasks = await q<{ title: string; status: string; client_id: string; task_number: number }>("select title, status::text, client_id, task_number from tasks order by task_number");
+    expect(tasks.map((t) => [t.title, t.status])).toEqual([
+      ["Collect W-2", "todo"],
+      ["Done already", "completed"],
+    ]);
+    expect(tasks.every((t) => t.client_id === "11111111-1111-4111-8111-111111111111")).toBe(true);
+  });
+
+  it("numbers existing records per firm and seeds the counters", async () => {
+    expect((await q<{ n: number }>("select client_number n from clients"))[0]!.n).toBe(1);
+    const counters = await q<{ kind: string; value: number }>("select kind, value from firm_counters order by kind");
+    expect(counters).toEqual([
+      { kind: "client", value: 1 },
+      { kind: "engagement", value: 1 },
+      { kind: "lead", value: 1 },
+      { kind: "task", value: 2 },
+    ]);
+  });
+
+  it("adds the engagement manager to the engagement team", async () => {
+    const team = await q<{ user_id: string; role: string }>("select user_id, role::text from engagement_team");
+    expect(team).toEqual([{ user_id: "22222222-2222-4222-8222-222222222222", role: "manager" }]);
+  });
 });
 
 describe("multi-firm migration on existing single-firm data", () => {

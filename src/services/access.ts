@@ -5,6 +5,7 @@ import { clientAssignments, clients, users } from "@/db/schema";
 import { isStaff, seesAllClients, type Actor } from "@/lib/auth/actor";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { isUuid } from "@/lib/validation";
+import { can, type Action, type Module } from "@/lib/auth/permissions";
 
 /**
  * Central authorization rules. Every service that touches client-specific data
@@ -25,11 +26,25 @@ export function requireStaff(actor: Actor): void {
   if (!isStaff(actor)) throw new ForbiddenError();
 }
 
-/** Preparers may assign work to themselves; only admins and partners can delegate it. */
-export function requireCanAssign(actor: Actor, assigneeId: string): void {
+/** Staff who may change records (everyone except read-only users and clients). */
+export function requireWriter(actor: Actor): void {
   requireStaff(actor);
-  if (actor.role === "preparer" && assigneeId !== actor.userId) {
-    throw new ForbiddenError("Only an admin or partner can assign work to another staff member.");
+  if (actor.role === "read_only") throw new ForbiddenError("Your account is read-only.");
+}
+
+/** Throws unless the actor holds this permission (see lib/auth/permissions.ts). */
+export function requirePermission(actor: Actor, module: Module, action: Action): void {
+  requireStaff(actor);
+  if (!can(actor, module, action)) {
+    throw new ForbiddenError(actor.role === "read_only" ? "Your account is read-only." : "You do not have permission to do that.");
+  }
+}
+
+/** Employees may assign work to themselves; only admins and managers can delegate it. */
+export function requireCanAssign(actor: Actor, assigneeId: string): void {
+  requireWriter(actor);
+  if (actor.role === "employee" && assigneeId !== actor.userId) {
+    throw new ForbiddenError("Only an admin or manager can assign work to another staff member.");
   }
 }
 

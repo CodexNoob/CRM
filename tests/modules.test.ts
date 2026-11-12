@@ -15,8 +15,8 @@ let admin: Actor, prepA: Actor, prepB: Actor;
 beforeAll(async () => {
   h = await createTestDb();
   admin = await createUser(h.db, { role: "admin", name: "Ada Admin" });
-  prepA = await createUser(h.db, { role: "preparer" });
-  prepB = await createUser(h.db, { role: "preparer" });
+  prepA = await createUser(h.db, { role: "employee" });
+  prepB = await createUser(h.db, { role: "employee" });
   const a = await createClient(h.db, admin, { type: "individual", displayName: "Alpha" });
   const b = await createClient(h.db, admin, { type: "individual", displayName: "Beta" });
   const ea = await createEngagement(h.db, admin, a.id, { title: "A", serviceType: "other", ownerId: prepA.userId });

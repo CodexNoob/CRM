@@ -8,7 +8,7 @@ import { Badge, ButtonLink, EmptyState, Panel, cx } from "@/components/ui";
 import { requireStaffActor } from "@/lib/auth/current";
 import { formatDate, PORTAL_STATUS, SERVICE_LABELS, STATUS_LABELS } from "@/lib/labels";
 import { orNotFound } from "@/lib/page-helpers";
-import { dueLabel, ENGAGEMENT_TONE } from "@/lib/status";
+import { dueLabel, ENGAGEMENT_TONE, TASK_OPEN } from "@/lib/status";
 import { firmToday } from "@/services/dashboard";
 import { getEngagement, listStaff } from "@/services/engagements";
 import { EngagementForm } from "../../engagement-form";
@@ -24,10 +24,10 @@ export default async function EngagementPage({ params }: { params: Promise<{ id:
   const db = getDb();
   const detail = await orNotFound(getEngagement(db, actor, id));
   const staff = await listStaff(db, actor);
-  const assignableStaff = actor.role === "preparer" ? staff.filter((member) => member.id === actor.userId) : staff;
+  const assignableStaff = actor.role === "employee" ? staff.filter((member) => member.id === actor.userId) : staff;
   const { engagement: e, tasks } = detail;
   const today = firmToday();
-  const open = tasks.filter((t) => t.status === "open");
+  const open = tasks.filter((t) => TASK_OPEN.includes(t.status));
   const done = tasks.length - open.length;
   const stageIndex = e.status === "completed" ? STAGES.length : STAGES.indexOf(e.status);
   const due = dueLabel(e.dueDate, today);
@@ -90,13 +90,13 @@ export default async function EngagementPage({ params }: { params: Promise<{ id:
                   const d = dueLabel(t.dueDate, today);
                   return (
                     <li key={t.id} className="flex items-center gap-3 px-4 py-2.5">
-                      <TaskToggle taskId={t.id} done={t.status === "done"} title={t.title} />
+                      <TaskToggle taskId={t.id} done={t.status === "completed"} title={t.title} />
                       <div className="min-w-0 flex-1">
-                        <p className={cx("text-[13px]", t.status === "done" ? "text-faint line-through" : "font-medium text-ink")}>{t.title}</p>
+                        <p className={cx("text-[13px]", t.status === "completed" ? "text-faint line-through" : "font-medium text-ink")}>{t.title}</p>
                         <p className="text-[12px] text-muted">{t.isClientTask ? "Client request · visible in portal" : (t.assigneeName ?? "Unassigned")}</p>
                       </div>
                       {t.isClientTask ? <Badge tone="warn">Client</Badge> : null}
-                      {t.dueDate ? <Badge tone={t.status === "done" ? "neutral" : d.tone}>{t.status === "done" ? formatDate(t.dueDate) : d.text}</Badge> : null}
+                      {t.dueDate ? <Badge tone={t.status === "completed" ? "neutral" : d.tone}>{t.status === "completed" ? formatDate(t.dueDate) : d.text}</Badge> : null}
                     </li>
                   );
                 })}

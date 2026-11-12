@@ -32,7 +32,7 @@ try {
 
   const firm = await createFirm(db, { name: "Demo Tax & Accounting", status: "active" });
   const adminInvite = await createStaffInvitation(db, firm.id, { email: "admin@demo.test", name: "Avery Admin", role: "admin" }, null);
-  const prepInvite = await createStaffInvitation(db, firm.id, { email: "preparer@demo.test", name: "Parker Preparer", role: "preparer" }, null);
+  const prepInvite = await createStaffInvitation(db, firm.id, { email: "preparer@demo.test", name: "Parker Preparer", role: "employee" }, null);
   links.push(["admin@demo.test (firm admin)", link(adminInvite.token)], ["preparer@demo.test (preparer)", link(prepInvite.token)]);
 
   const admin: Actor = { userId: adminInvite.userId, firmId: firm.id, role: "admin", clientId: null, name: "Avery Admin", email: "admin@demo.test" };

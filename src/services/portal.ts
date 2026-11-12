@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@/db";
-import { clients, engagements, tasks, users, type EngagementStatus, type ServiceType } from "@/db/schema";
+import { clients, engagements, tasks, users, type EngagementStatus, type ServiceType, type TaskStatus } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
 import { ForbiddenError } from "@/lib/errors";
 
@@ -19,7 +19,7 @@ export interface PortalOverview {
     status: EngagementStatus;
     dueDate: string | null;
     contactName: string;
-    tasks: { id: string; title: string; status: "open" | "done"; dueDate: string | null }[];
+    tasks: { id: string; title: string; status: TaskStatus; dueDate: string | null }[];
   }[];
 }
 

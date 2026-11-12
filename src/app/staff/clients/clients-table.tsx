@@ -1,5 +1,7 @@
 "use client";
 
+import type { ClientStatus } from "@/db/schema";
+
 import { Briefcase, MessageSquare, Pencil, Users } from "lucide-react";
 import { CellTitle, DataTable } from "@/components/data-table";
 import { Badge, ButtonLink } from "@/components/ui";
@@ -10,7 +12,7 @@ export interface ClientRow {
   id: string;
   displayName: string;
   type: "individual" | "household" | "business";
-  status: "prospect" | "active" | "inactive";
+  status: ClientStatus;
   email: string | null;
   phone: string | null;
   createdAt: string;

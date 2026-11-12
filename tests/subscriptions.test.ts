@@ -63,8 +63,8 @@ let pp: ReturnType<typeof fakePayPal>;
 beforeAll(async () => {
   h = await createTestDb();
   admin = await createUser(h.db, { role: "admin" });
-  prepA = await createUser(h.db, { role: "preparer" });
-  prepB = await createUser(h.db, { role: "preparer" });
+  prepA = await createUser(h.db, { role: "employee" });
+  prepB = await createUser(h.db, { role: "employee" });
   const a = await createClientWithPortalUser(h.db, admin, "Client A");
   const b = await createClientWithPortalUser(h.db, admin, "Client B");
   clientA = a.client.id;

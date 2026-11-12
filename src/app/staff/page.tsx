@@ -53,7 +53,7 @@ export default async function StaffDashboard({ searchParams }: { searchParams: P
         <SegmentedLinks
           label="Scope"
           items={[
-            { href: "/staff", label: actor.role === "preparer" ? "My clients" : "Whole firm", active: !mine },
+            { href: "/staff", label: actor.role === "employee" ? "My clients" : "Whole firm", active: !mine },
             { href: "/staff?view=mine", label: "Engagements I own", active: mine },
           ]}
         />
@@ -61,7 +61,7 @@ export default async function StaffDashboard({ searchParams }: { searchParams: P
 
       <StatStrip
         items={[
-          { label: "Active clients", value: d.metrics.activeClients, hint: actor.role === "preparer" ? "Assigned to you" : "Across the firm", href: "/staff/clients" },
+          { label: "Active clients", value: d.metrics.activeClients, hint: actor.role === "employee" ? "Assigned to you" : "Across the firm", href: "/staff/clients" },
           { label: "Open engagements", value: d.metrics.open, hint: `${d.metrics.waitingOnClient} waiting on client`, href: "/staff/engagements" },
           { label: "Pending tax returns", value: counts.pendingReturns, hint: "Not yet filed", href: "/staff/tax-preparation" },
           { label: "Overdue", value: d.metrics.overdue, hint: "Past due date", tone: d.metrics.overdue ? "danger" : "default", href: "/staff/engagements" },

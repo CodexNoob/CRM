@@ -27,14 +27,14 @@ afterAll(async () => {
 
 describe("login", () => {
   it("signs in with correct credentials, case-insensitive email", async () => {
-    const staff = await createUser(h.db, { role: "preparer", password: PASSWORD });
+    const staff = await createUser(h.db, { role: "employee", password: PASSWORD });
     const result = await login(h.db, { email: staff.email.toUpperCase(), password: PASSWORD });
     expect(result.actor.userId).toBe(staff.userId);
     expect(result.token.length).toBeGreaterThan(30);
   });
 
   it("stores only a hash of the session token", async () => {
-    const staff = await createUser(h.db, { role: "preparer", password: PASSWORD });
+    const staff = await createUser(h.db, { role: "employee", password: PASSWORD });
     const { token } = await login(h.db, { email: staff.email, password: PASSWORD });
     const rows = await h.db.select().from(sessions).where(eq(sessions.userId, staff.userId));
     expect(rows).toHaveLength(1);
@@ -43,21 +43,21 @@ describe("login", () => {
   });
 
   it("gives the same generic error for unknown email and wrong password", async () => {
-    const staff = await createUser(h.db, { role: "preparer", password: PASSWORD });
+    const staff = await createUser(h.db, { role: "employee", password: PASSWORD });
     await expect(login(h.db, { email: "nobody@example.test", password: PASSWORD })).rejects.toThrow(LOGIN_FAILED_MESSAGE);
     await expect(login(h.db, { email: staff.email, password: "wrong password!!" })).rejects.toThrow(LOGIN_FAILED_MESSAGE);
   });
 
   it("rejects users who have not set a password, and deactivated users", async () => {
-    const invited = await createUser(h.db, { role: "preparer" });
+    const invited = await createUser(h.db, { role: "employee" });
     await expect(login(h.db, { email: invited.email, password: PASSWORD })).rejects.toBeInstanceOf(AuthenticationError);
-    const gone = await createUser(h.db, { role: "preparer", password: PASSWORD });
+    const gone = await createUser(h.db, { role: "employee", password: PASSWORD });
     await deactivate(h.db, gone.userId);
     await expect(login(h.db, { email: gone.email, password: PASSWORD })).rejects.toBeInstanceOf(AuthenticationError);
   });
 
   it("locks the account after repeated failures, even for the right password", async () => {
-    const staff = await createUser(h.db, { role: "preparer", password: PASSWORD });
+    const staff = await createUser(h.db, { role: "employee", password: PASSWORD });
     const now = new Date();
     for (let i = 0; i < MAX_FAILED_LOGINS; i++) {
       await expect(login(h.db, { email: staff.email, password: "nope nope nope" }, now)).rejects.toThrow();
@@ -68,7 +68,7 @@ describe("login", () => {
   });
 
   it("never writes the password into the audit log", async () => {
-    const staff = await createUser(h.db, { role: "preparer", password: PASSWORD });
+    const staff = await createUser(h.db, { role: "employee", password: PASSWORD });
     await login(h.db, { email: staff.email, password: "a-wrong-secret-value" }).catch(() => {});
     await login(h.db, { email: staff.email, password: PASSWORD });
     const events = await h.db.select().from(auditEvents).where(eq(auditEvents.actorUserId, staff.userId));
@@ -105,7 +105,7 @@ describe("sessions", () => {
   });
 
   it("rejects sessions of deactivated users and supports sign-out", async () => {
-    const a = await createUser(h.db, { role: "preparer", password: PASSWORD });
+    const a = await createUser(h.db, { role: "employee", password: PASSWORD });
     const s1 = await createSession(h.db, a.userId);
     await invalidateSession(h.db, s1.token);
     expect(await validateSessionToken(h.db, s1.token)).toBeNull();
@@ -121,7 +121,7 @@ describe("invitations", () => {
     const { token, userId } = await createStaffInvitation(
       h.db,
       await defaultFirmId(h.db),
-      { email: "New.Preparer@Example.test", name: "New Preparer", role: "preparer" },
+      { email: "New.Preparer@Example.test", name: "New Preparer", role: "employee" },
       null,
     );
     const stored = await h.db.select().from(invitations).where(eq(invitations.userId, userId));
@@ -130,21 +130,21 @@ describe("invitations", () => {
     await acceptInvitation(h.db, token, PASSWORD);
     await expect(acceptInvitation(h.db, token, PASSWORD)).rejects.toBeInstanceOf(InvalidInvitationError);
     const result = await login(h.db, { email: "new.preparer@example.test", password: PASSWORD });
-    expect(result.actor.role).toBe("preparer");
+    expect(result.actor.role).toBe("employee");
 
     const [user] = await h.db.select().from(users).where(eq(users.id, userId));
     expect(user!.passwordHash).toMatch(/^\$argon2id\$/);
   });
 
   it("rejects expired invitations and weak passwords", async () => {
-    const { token } = await createStaffInvitation(h.db, await defaultFirmId(h.db), { email: "late@example.test", name: "Late", role: "preparer" }, null);
+    const { token } = await createStaffInvitation(h.db, await defaultFirmId(h.db), { email: "late@example.test", name: "Late", role: "employee" }, null);
     await expect(acceptInvitation(h.db, token, "short")).rejects.toBeInstanceOf(ValidationError);
     const later = new Date(Date.now() + INVITATION_TTL_MS + 1000);
     await expect(acceptInvitation(h.db, token, PASSWORD, later)).rejects.toBeInstanceOf(InvalidInvitationError);
   });
 
   it("only admins may invite staff", async () => {
-    const preparer = await createUser(h.db, { role: "preparer" });
+    const preparer = await createUser(h.db, { role: "employee" });
     await expect(
       createStaffInvitation(h.db, preparer.firmId, { email: "x@example.test", name: "X", role: "admin" }, preparer),
     ).rejects.toThrow("permission");

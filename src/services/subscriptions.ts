@@ -3,7 +3,7 @@ import type { Db } from "@/db";
 import { clients, subscriptions, type Subscription, type SubscriptionStatus } from "@/db/schema";
 import * as paypal from "@/integrations/paypal";
 import type { PayPalSubscriptionSnapshot, PayPalSubscriptionStatus } from "@/integrations/paypal";
-import { seesAllClients, type Actor } from "@/lib/auth/actor";
+import { isManagerOrAdmin, type Actor } from "@/lib/auth/actor";
 import { ForbiddenError, IntegrationNotConfiguredError, NotFoundError, ValidationError } from "@/lib/errors";
 import { isUuid, parseInput, subscriptionInputSchema } from "@/lib/validation";
 import { assertClientAccess, inFirm, requireStaff, visibleClientsCondition } from "./access";
@@ -151,7 +151,7 @@ export async function refreshSubscription(db: Db, actor: Actor, id: string, p: S
 /** Stops future charges. Admin/partner only (billing correction). */
 export async function cancelSubscription(db: Db, actor: Actor, id: string, p: SubscriptionProvider = paypalSubscriptions(), now = new Date()): Promise<void> {
   requireStaff(actor);
-  if (!seesAllClients(actor)) throw new ForbiddenError("Only an admin or partner can cancel subscriptions.");
+  if (!isManagerOrAdmin(actor)) throw new ForbiddenError("Only an admin or manager can cancel subscriptions.");
   const row = await loadForStaff(db, actor, id);
   if (!LIVE_STATUSES.includes(row.status)) throw new ValidationError({ _form: ["This subscription has already ended."] });
   requireConfigured(p);

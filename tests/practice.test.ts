@@ -16,7 +16,7 @@ let admin: Actor, prepA: Actor, portal: Actor;
 beforeAll(async () => {
   h = await createTestDb();
   admin = await createUser(h.db, { role: "admin" });
-  prepA = await createUser(h.db, { role: "preparer" });
+  prepA = await createUser(h.db, { role: "employee" });
   const a = await createClientWithPortalUser(h.db, admin, "Alpha");
   portal = a.portalUser;
   const b = await createClient(h.db, admin, { type: "business", displayName: "Beta LLC" });

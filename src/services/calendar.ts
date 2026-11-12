@@ -1,4 +1,5 @@
-import { and, asc, eq, gte, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
+import { TASK_OPEN, ENGAGEMENT_DONE } from "@/lib/status";
+import { and, asc, eq, gte, isNotNull, isNull, lt, ne, notInArray, or, sql, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@/db";
 import { appointments, clients, engagements, tasks, users, type Appointment, type AppointmentKind } from "@/db/schema";
@@ -73,13 +74,13 @@ export async function getCalendar(db: Db, actor: Actor, fromDate: string, toDate
       .select({ id: engagements.id, title: engagements.title, dueDate: engagements.dueDate, clientId: clients.id, clientName: clients.displayName })
       .from(engagements)
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(inFirm(engagements.firmId, actor), visible, isNotNull(engagements.dueDate), gte(engagements.dueDate, fromDate), lt(engagements.dueDate, toDate), notInArray(engagements.status, ["completed", "filed"]))),
+      .where(and(inFirm(engagements.firmId, actor), visible, isNotNull(engagements.dueDate), gte(engagements.dueDate, fromDate), lt(engagements.dueDate, toDate), notInArray(engagements.status, [...ENGAGEMENT_DONE]))),
     db
       .select({ id: tasks.id, title: tasks.title, dueDate: tasks.dueDate, engagementId: engagements.id, clientName: clients.displayName })
       .from(tasks)
       .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(inFirm(tasks.firmId, actor), visible, eq(tasks.status, "open"), isNotNull(tasks.dueDate), gte(tasks.dueDate, fromDate), lt(tasks.dueDate, toDate))),
+      .where(and(inFirm(tasks.firmId, actor), visible, inArray(tasks.status, TASK_OPEN), isNotNull(tasks.dueDate), gte(tasks.dueDate, fromDate), lt(tasks.dueDate, toDate))),
   ]);
 
   const items: CalendarItem[] = [

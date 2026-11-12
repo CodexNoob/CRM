@@ -7,11 +7,12 @@ import { CellTitle, DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui";
 import { formatDate } from "@/lib/labels";
 import { dueLabel } from "@/lib/status";
+import type { TaskStatus } from "@/db/schema";
 
 export interface TaskRowData {
   id: string;
   title: string;
-  status: "open" | "done";
+  status: TaskStatus;
   isClientTask: boolean;
   dueDate: string | null;
   assigneeName: string | null;

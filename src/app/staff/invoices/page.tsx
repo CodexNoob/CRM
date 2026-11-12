@@ -4,7 +4,7 @@ import { CreditCard, Receipt, Repeat } from "lucide-react";
 import { getDb } from "@/db";
 import { InvoiceTable } from "@/components/invoice-table";
 import { ButtonLink, cx, EmptyState, PageHeader, Panel, StatStrip } from "@/components/ui";
-import { seesAllClients } from "@/lib/auth/actor";
+import { isManagerOrAdmin } from "@/lib/auth/actor";
 import { requireStaffActor } from "@/lib/auth/current";
 import { formatMoney } from "@/lib/labels";
 import { firmToday } from "@/services/dashboard";
@@ -77,7 +77,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         }
       >
         {rows.length ? (
-          <InvoiceTable rows={rows} showClient canCancel={seesAllClients(actor)} today={today} />
+          <InvoiceTable rows={rows} showClient canCancel={isManagerOrAdmin(actor)} today={today} />
         ) : (
           <EmptyState icon={<Receipt />} title={filter === "open" ? "Nothing awaiting payment" : "No invoices here"} action={<ButtonLink href="/staff/clients" variant="secondary" size="sm">Go to clients</ButtonLink>}>
             Create an invoice from a client’s record, on the Billing tab.
@@ -86,7 +86,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
       </Panel>
       <Panel title="Subscriptions" description="Recurring monthly or yearly billing. Set one up from a client’s Billing tab." flush className="mt-5">
         {subs.length ? (
-          <SubscriptionTable rows={subs} showClient canCancel={seesAllClients(actor)} />
+          <SubscriptionTable rows={subs} showClient canCancel={isManagerOrAdmin(actor)} />
         ) : (
           <EmptyState icon={<Repeat />} title="No subscriptions yet">
             Open a client’s record, choose the Billing tab, and use “New subscription”.

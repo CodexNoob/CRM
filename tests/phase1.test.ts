@@ -23,8 +23,8 @@ let clientA: string, clientB: string, engA: string;
 beforeAll(async () => {
   h = await createTestDb();
   admin = await createUser(h.db, { role: "admin", name: "Ada Admin" });
-  prepA = await createUser(h.db, { role: "preparer", name: "Pat A" });
-  prepB = await createUser(h.db, { role: "preparer", name: "Pat B" });
+  prepA = await createUser(h.db, { role: "employee", name: "Pat A" });
+  prepB = await createUser(h.db, { role: "employee", name: "Pat B" });
   const a = await createClientWithPortalUser(h.db, admin, "Client A");
   const b = await createClientWithPortalUser(h.db, admin, "Client B");
   clientA = a.client.id;

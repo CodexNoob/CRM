@@ -1,4 +1,5 @@
-import { and, desc, eq, ilike, isNotNull, isNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { TASK_OPEN, ENGAGEMENT_DONE } from "@/lib/status";
+import { and, desc, eq, ilike, isNotNull, isNull, lt, notInArray, or, sql, inArray } from "drizzle-orm";
 import type { Db } from "@/db";
 import { clients, documents, engagements, leads, tasks } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
@@ -30,7 +31,7 @@ export async function getNotifications(db: Db, actor: Actor): Promise<Notificati
       .select({ n })
       .from(engagements)
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(inFirm(engagements.firmId, actor), visible, isNotNull(engagements.dueDate), lt(engagements.dueDate, today), notInArray(engagements.status, ["filed", "completed"]))),
+      .where(and(inFirm(engagements.firmId, actor), visible, isNotNull(engagements.dueDate), lt(engagements.dueDate, today), notInArray(engagements.status, [...ENGAGEMENT_DONE]))),
     db
       .select({ n })
       .from(tasks)
@@ -42,7 +43,7 @@ export async function getNotifications(db: Db, actor: Actor): Promise<Notificati
           inFirm(engagements.firmId, actor),
           visible,
           eq(tasks.assigneeId, actor.userId),
-          eq(tasks.status, "open"),
+          inArray(tasks.status, TASK_OPEN),
           isNotNull(tasks.dueDate),
           sql`${tasks.dueDate} <= ${today}`,
         ),

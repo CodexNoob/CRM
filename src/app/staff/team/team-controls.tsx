@@ -10,7 +10,7 @@ import { cx } from "@/components/ui";
 import { idleState } from "@/lib/action-state";
 import { ROLE_LABELS } from "@/lib/labels";
 
-const roleOptions = (["admin", "partner", "preparer"] as const).map((r) => ({ value: r, label: ROLE_LABELS[r] }));
+const roleOptions = (["admin", "manager", "employee"] as const).map((r) => ({ value: r, label: ROLE_LABELS[r] }));
 
 export function InviteStaffForm() {
   const [state, action] = useActionState(inviteStaffAction, idleState);
@@ -27,7 +27,7 @@ export function InviteStaffForm() {
       {link ? <InviteLink link={link} id="staff-invite-link" /> : null}
       <TextField name="name" label="Name" required state={fieldState} />
       <TextField name="email" label="Work email" type="email" inputMode="email" autoComplete="off" required state={fieldState} />
-      <SelectField name="role" label="Role" required state={fieldState} defaultValue="preparer" options={roleOptions} />
+      <SelectField name="role" label="Role" required state={fieldState} defaultValue="employee" options={roleOptions} />
       <SubmitButton pendingText="Creating…" className="w-full">Create invitation link</SubmitButton>
     </form>
   );

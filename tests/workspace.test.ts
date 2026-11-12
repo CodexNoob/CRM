@@ -19,8 +19,8 @@ let clientA: string, clientB: string, engA: string, engB: string;
 beforeAll(async () => {
   h = await createTestDb();
   admin = await createUser(h.db, { role: "admin", name: "Ada Admin" });
-  prepA = await createUser(h.db, { role: "preparer", name: "Pat A" });
-  prepB = await createUser(h.db, { role: "preparer", name: "Pat B" });
+  prepA = await createUser(h.db, { role: "employee", name: "Pat A" });
+  prepB = await createUser(h.db, { role: "employee", name: "Pat B" });
   clientA = (await createClient(h.db, admin, { type: "individual", displayName: "Alpha Person", email: "alpha@example.test" })).id;
   clientB = (await createClient(h.db, admin, { type: "business", displayName: "Beta Corp" })).id;
   portal = await createUser(h.db, { role: "client", clientId: clientA });

@@ -15,7 +15,7 @@ export default async function ClientsPage() {
     <>
       <PageHeader
         title="Clients"
-        description={actor.role === "preparer" ? "Clients assigned to you." : "Every individual, household and business client of the firm."}
+        description={actor.role === "employee" ? "Clients assigned to you." : "Every individual, household and business client of the firm."}
         actions={
           <ButtonLink href="/staff/clients/new">
             <Plus /> New client

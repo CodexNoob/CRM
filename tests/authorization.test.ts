@@ -31,8 +31,8 @@ let clientTaskA: string, clientTaskB: string, internalTaskA: string;
 beforeAll(async () => {
   h = await createTestDb();
   admin = await createUser(h.db, { role: "admin" });
-  preparerA = await createUser(h.db, { role: "preparer", name: "Preparer A" });
-  preparerB = await createUser(h.db, { role: "preparer", name: "Preparer B" });
+  preparerA = await createUser(h.db, { role: "employee", name: "Preparer A" });
+  preparerB = await createUser(h.db, { role: "employee", name: "Preparer B" });
 
   const a = await createClientWithPortalUser(h.db, admin, "Client A");
   const b = await createClientWithPortalUser(h.db, admin, "Client B");
@@ -73,7 +73,7 @@ describe("client portal isolation", () => {
   it("does not let a client complete another client's task", async () => {
     await expect(setTaskStatus(h.db, portalA, clientTaskB, "done")).rejects.toBeInstanceOf(NotFoundError);
     const b = await getPortalOverview(h.db, portalB);
-    expect(b.engagements[0]!.tasks[0]!.status).toBe("open");
+    expect(b.engagements[0]!.tasks[0]!.status).toBe("todo");
   });
 
   it("does not let a client complete internal tasks or reopen tasks", async () => {
@@ -83,7 +83,7 @@ describe("client portal isolation", () => {
 
   it("lets a client complete their own client-facing task", async () => {
     const t = await setTaskStatus(h.db, portalA, clientTaskA, "done");
-    expect(t.status).toBe("done");
+    expect(t.status).toBe("completed");
     expect(t.completedById).toBe(portalA.userId);
   });
 
@@ -143,7 +143,7 @@ describe("staff least privilege", () => {
   });
 
   it("lets partners and admins see every client", async () => {
-    const partner = await createUser(h.db, { role: "partner" });
+    const partner = await createUser(h.db, { role: "manager" });
     const ids = (await listClients(h.db, partner)).map((c) => c.id);
     expect(ids).toEqual(expect.arrayContaining([clientA.id, clientB.id]));
   });

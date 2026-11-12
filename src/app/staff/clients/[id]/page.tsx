@@ -11,7 +11,7 @@ import { NewInvoiceForm, NewSubscriptionForm } from "@/components/invoice-client
 import { InvoiceTable } from "@/components/invoice-table";
 import { SubscriptionTable } from "@/components/subscription-table";
 import { listClientSubscriptions } from "@/services/subscriptions";
-import { seesAllClients, type Actor } from "@/lib/auth/actor";
+import { isManagerOrAdmin, type Actor } from "@/lib/auth/actor";
 import { requireStaffActor } from "@/lib/auth/current";
 import { CLIENT_STATUS_LABELS, CLIENT_TYPE_LABELS, formatDate, ROLE_LABELS, SERVICE_LABELS, STATUS_LABELS } from "@/lib/labels";
 import { orNotFound } from "@/lib/page-helpers";
@@ -313,7 +313,7 @@ async function BillingTab({
     <div className="grid gap-5 xl:grid-cols-5">
       <Panel title="Subscriptions" description="Recurring monthly or yearly billing. The client subscribes from their portal." flush className="xl:col-span-3">
         {subs.length ? (
-          <SubscriptionTable rows={subs} showClient={false} canCancel={seesAllClients(actor)} />
+          <SubscriptionTable rows={subs} showClient={false} canCancel={isManagerOrAdmin(actor)} />
         ) : (
           <EmptyState icon={<Repeat />} title="No subscriptions">
             Set up a plan (for example, monthly bookkeeping). The client gets a Subscribe button in their portal and is then charged automatically.
@@ -329,7 +329,7 @@ async function BillingTab({
       </Panel>
       <Panel title="Invoices" description="Stored in PayPal; payment status refreshes automatically." flush className="xl:col-span-3">
         {rows.length ? (
-          <InvoiceTable rows={rows} showClient={false} canCancel={seesAllClients(actor)} today={today} />
+          <InvoiceTable rows={rows} showClient={false} canCancel={isManagerOrAdmin(actor)} today={today} />
         ) : (
           <EmptyState icon={<Receipt />} title="No invoices yet">
             Invoices you create here are emailed by PayPal. The client can pay by card or PayPal, and also sees them in the portal.

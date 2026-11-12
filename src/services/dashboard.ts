@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, gte, isNotNull, lt, lte, notInArray, sql } from "drizzle-orm";
+import { TASK_OPEN, ENGAGEMENT_DONE } from "@/lib/status";
+import { and, asc, desc, eq, gte, isNotNull, lt, lte, notInArray, sql, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@/db";
 import { clients, engagements, tasks, users, type EngagementStatus } from "@/db/schema";
@@ -6,7 +7,7 @@ import type { Actor } from "@/lib/auth/actor";
 import { inFirm, requireStaff, visibleClientsCondition } from "./access";
 
 /** Statuses that need no further work. Everything else counts as open. */
-const DONE: EngagementStatus[] = ["completed", "filed"];
+const DONE: EngagementStatus[] = [...ENGAGEMENT_DONE];
 export const DUE_SOON_DAYS = 14;
 
 /** The firm's calendar date, so "overdue" flips at the firm's midnight, not the server's. */
@@ -62,7 +63,7 @@ export async function getDashboard(db: Db, actor: Actor, opts: { mine?: boolean;
       .from(tasks)
       .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(taskFirm, visible, eq(tasks.assigneeId, actor.userId), eq(tasks.status, "open"))),
+      .where(and(taskFirm, visible, eq(tasks.assigneeId, actor.userId), inArray(tasks.status, TASK_OPEN))),
     db.select({ n: count }).from(clients).where(and(visible, eq(clients.status, "active"))),
     db
       .select({ status: engagements.status, count })
@@ -98,7 +99,7 @@ export async function getDashboard(db: Db, actor: Actor, opts: { mine?: boolean;
       .from(tasks)
       .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(taskFirm, visible, eq(tasks.assigneeId, actor.userId), eq(tasks.status, "open")))
+      .where(and(taskFirm, visible, eq(tasks.assigneeId, actor.userId), inArray(tasks.status, TASK_OPEN)))
       .orderBy(sql`${tasks.dueDate} asc nulls last`, asc(tasks.createdAt))
       .limit(8),
     db

@@ -1,6 +1,8 @@
+import { ASSIGNABLE_ROLES } from "@/lib/auth/actor";
+import { TASK_OPEN, ENGAGEMENT_DONE } from "@/lib/status";
 import { and, asc, desc, eq, inArray, isNotNull, lt, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { Db } from "@/db";
-import { auditEvents, clientAssignments, clients, documents, engagements, tasks, users, type EngagementStatus } from "@/db/schema";
+import { auditEvents, clientAssignments, clients, documents, engagements, tasks, users, type EngagementStatus, type ClientStatus } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
 import { assertClientAccess, inFirm, requireStaff, visibleClientsCondition } from "./access";
 import { firmToday } from "./dashboard";
@@ -112,7 +114,7 @@ export async function getWorkload(db: Db, actor: Actor): Promise<WorkloadRow[]> 
   requireStaff(actor);
   const visible = visibleClientsCondition(db, actor);
   const today = firmToday();
-  const open = notInArray(engagements.status, ["filed", "completed"]);
+  const open = notInArray(engagements.status, [...ENGAGEMENT_DONE]);
   const [eng, tsk, staff] = await Promise.all([
     db
       .select({
@@ -130,9 +132,9 @@ export async function getWorkload(db: Db, actor: Actor): Promise<WorkloadRow[]> 
       .from(tasks)
       .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(visible, inFirm(tasks.firmId, actor), eq(tasks.status, "open"), isNotNull(tasks.assigneeId)))
+      .where(and(visible, inFirm(tasks.firmId, actor), inArray(tasks.status, TASK_OPEN), isNotNull(tasks.assigneeId)))
       .groupBy(tasks.assigneeId),
-    db.select({ id: users.id, name: users.name, role: users.role }).from(users).where(and(inFirm(users.firmId, actor), eq(users.isActive, true), inArray(users.role, ["admin", "partner", "preparer"]))).orderBy(asc(users.name)),
+    db.select({ id: users.id, name: users.name, role: users.role }).from(users).where(and(inFirm(users.firmId, actor), eq(users.isActive, true), inArray(users.role, ASSIGNABLE_ROLES))).orderBy(asc(users.name)),
   ]);
   const e = new Map(eng.map((r) => [r.ownerId, r]));
   const t = new Map(tsk.map((r) => [r.assigneeId, r.n]));
@@ -159,13 +161,13 @@ export async function getPracticeCounts(db: Db, actor: Actor) {
       .select({ n })
       .from(engagements)
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(visible, inFirm(engagements.firmId, actor), inArray(engagements.serviceType, ["individual_tax", "business_tax"]), notInArray(engagements.status, ["filed", "completed"]))),
+      .where(and(visible, inFirm(engagements.firmId, actor), inArray(engagements.serviceType, ["individual_tax", "business_tax"]), notInArray(engagements.status, [...ENGAGEMENT_DONE]))),
     db
       .select({ n })
       .from(tasks)
       .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
       .innerJoin(clients, eq(clients.id, engagements.clientId))
-      .where(and(visible, inFirm(tasks.firmId, actor), eq(tasks.isClientTask, true), eq(tasks.status, "open"))),
+      .where(and(visible, inFirm(tasks.firmId, actor), eq(tasks.isClientTask, true), inArray(tasks.status, TASK_OPEN))),
     db
       .select({ n })
       .from(documents)
@@ -184,7 +186,7 @@ export async function listAttentionTasks(db: Db, actor: Actor, limit = 8) {
     .from(tasks)
     .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
     .innerJoin(clients, eq(clients.id, engagements.clientId))
-    .where(and(visible, inFirm(tasks.firmId, actor), eq(tasks.assigneeId, actor.userId), eq(tasks.status, "open"), or(lt(tasks.dueDate, soon), sql`${tasks.dueDate} = ${soon}`)))
+    .where(and(visible, inFirm(tasks.firmId, actor), eq(tasks.assigneeId, actor.userId), inArray(tasks.status, TASK_OPEN), or(lt(tasks.dueDate, soon), sql`${tasks.dueDate} = ${soon}`)))
     .orderBy(asc(tasks.dueDate))
     .limit(limit);
 }
@@ -195,7 +197,7 @@ export interface ClientOverviewRow {
   id: string;
   displayName: string;
   type: "individual" | "household" | "business";
-  status: "prospect" | "active" | "inactive";
+  status: ClientStatus;
   email: string | null;
   phone: string | null;
   createdAt: Date;
@@ -215,7 +217,7 @@ export async function listClientsOverview(db: Db, actor: Actor): Promise<ClientO
       email: clients.email,
       phone: clients.phone,
       createdAt: clients.createdAt,
-      openEngagements: sql<number>`(select count(*)::int from engagements e where e.client_id = "clients"."id" and e.firm_id = "clients"."firm_id" and e.status not in ('filed','completed'))`,
+      openEngagements: sql<number>`(select count(*)::int from engagements e where e.client_id = "clients"."id" and e.firm_id = "clients"."firm_id" and e.status not in ('filed','completed','cancelled','closed'))`,
       team: sql<string | null>`(select string_agg(u.name, ', ' order by u.name) from client_assignments ca join users u on u.id = ca.user_id where ca.client_id = "clients"."id" and ca.firm_id = "clients"."firm_id" and u.firm_id = "clients"."firm_id" and u.is_active)`,
       portalUsers: sql<number>`(select count(*)::int from users pu where pu.client_id = "clients"."id" and pu.firm_id = "clients"."firm_id" and pu.role = 'client' and pu.is_active)`,
     })

@@ -1,14 +1,16 @@
+import { ASSIGNABLE_ROLES } from "@/lib/auth/actor";
 import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@/db";
-import { clients, engagements, tasks, users, type Engagement, type EngagementStatus, type Task } from "@/db/schema";
+import { clients, engagements, tasks, users, type Engagement, type EngagementStatus, type Task, type TaskStatus } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 import { engagementInputSchema, isUuid, parseInput, taskInputSchema } from "@/lib/validation";
 import { recordAudit } from "./audit";
 import { assertActiveStaffUser, assertClientAccess, ensureAssignment, inFirm, requireCanAssign, requireStaff, visibleClientsCondition } from "./access";
 
-const CLOSED_STATUSES: EngagementStatus[] = ["completed"];
+/** Hidden from the open engagements list. Filed stays visible until it is completed or closed. */
+const CLOSED_STATUSES: EngagementStatus[] = ["completed", "cancelled", "closed"];
 
 export interface EngagementSummary {
   id: string;
@@ -36,7 +38,7 @@ function summarySelect() {
     clientId: engagements.clientId,
     clientName: clients.displayName,
     ownerName: owner.name,
-    openTaskCount: sql<number>`(select count(*)::int from ${tasks} where ${tasks.engagementId} = ${engagements.id} and ${tasks.firmId} = ${engagements.firmId} and ${tasks.status} = 'open')`,
+    openTaskCount: sql<number>`(select count(*)::int from ${tasks} where ${tasks.engagementId} = ${engagements.id} and ${tasks.firmId} = ${engagements.firmId} and ${tasks.status} in ('todo','in_progress','waiting_client','waiting_review','blocked'))`,
   };
 }
 
@@ -256,7 +258,9 @@ export async function createTask(db: Db, actor: Actor, engagementId: string, inp
  *  - Staff: any task on an engagement they can access.
  *  - Clients: only client-facing tasks on their own engagements, and only to mark done.
  */
-export async function setTaskStatus(db: Db, actor: Actor, taskId: string, status: "open" | "done"): Promise<Task> {
+export async function setTaskStatus(db: Db, actor: Actor, taskId: string, requested: TaskStatus | "open" | "done"): Promise<Task> {
+  // "open" / "done" are accepted from older callers (portal, bulk actions) and mean To do / Completed.
+  const status: TaskStatus = requested === "open" ? "todo" : requested === "done" ? "completed" : requested;
   if (!isUuid(taskId)) throw new NotFoundError();
   const [row] = await db
     .select({ task: tasks, clientId: engagements.clientId })
@@ -268,7 +272,7 @@ export async function setTaskStatus(db: Db, actor: Actor, taskId: string, status
 
   if (actor.role === "client") {
     if (!actor.clientId || row.clientId !== actor.clientId || !row.task.isClientTask) throw new NotFoundError();
-    if (status !== "done") throw new NotFoundError();
+    if (status !== "completed") throw new NotFoundError();
   } else {
     await assertClientAccess(db, actor, row.clientId);
   }
@@ -278,8 +282,8 @@ export async function setTaskStatus(db: Db, actor: Actor, taskId: string, status
     .update(tasks)
     .set({
       status,
-      completedAt: status === "done" ? new Date() : null,
-      completedById: status === "done" ? actor.userId : null,
+      completedAt: status === "completed" ? new Date() : null,
+      completedById: status === "completed" ? actor.userId : null,
       updatedAt: new Date(),
     })
     .where(and(eq(tasks.id, taskId), inFirm(tasks.firmId, actor)))
@@ -288,7 +292,7 @@ export async function setTaskStatus(db: Db, actor: Actor, taskId: string, status
   await recordAudit(db, {
     firmId: actor.firmId,
     actorUserId: actor.userId,
-    action: status === "done" ? "task.complete" : "task.reopen",
+    action: status === "completed" ? "task.complete" : row.task.status === "completed" ? "task.reopen" : "task.status",
     entityType: "task",
     entityId: taskId,
   });
@@ -301,6 +305,6 @@ export async function listStaff(db: Db, actor: Actor) {
   return db
     .select({ id: users.id, name: users.name, role: users.role })
     .from(users)
-    .where(and(inFirm(users.firmId, actor), eq(users.isActive, true), inArray(users.role, ["admin", "partner", "preparer"])))
+    .where(and(inFirm(users.firmId, actor), eq(users.isActive, true), inArray(users.role, ASSIGNABLE_ROLES)))
     .orderBy(asc(users.name));
 }

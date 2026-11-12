@@ -1,14 +1,15 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { TASK_CLOSED, TASK_OPEN } from "@/lib/status";
+import { and, asc, eq, sql, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@/db";
-import { clients, engagements, tasks, users } from "@/db/schema";
+import { clients, engagements, tasks, users, type TaskStatus } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
 import { inFirm, visibleClientsCondition } from "./access";
 
 export interface TaskRow {
   id: string;
   title: string;
-  status: "open" | "done";
+  status: TaskStatus;
   isClientTask: boolean;
   dueDate: string | null;
   assigneeName: string | null;
@@ -48,7 +49,7 @@ export async function listTasks(
         inFirm(tasks.firmId, actor),
         inFirm(engagements.firmId, actor),
         visible,
-        eq(tasks.status, opts.status ?? "open"),
+        inArray(tasks.status, opts.status === "done" ? TASK_CLOSED : TASK_OPEN),
         opts.mine ? eq(tasks.assigneeId, actor.userId) : undefined,
         opts.clientId ? eq(clients.id, opts.clientId) : undefined,
       ),
@@ -64,6 +65,6 @@ export async function countMyOpenTasks(db: Db, actor: Actor): Promise<number> {
     .from(tasks)
     .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
     .innerJoin(clients, eq(clients.id, engagements.clientId))
-    .where(and(inFirm(tasks.firmId, actor), inFirm(engagements.firmId, actor), visible, eq(tasks.assigneeId, actor.userId), eq(tasks.status, "open")));
+    .where(and(inFirm(tasks.firmId, actor), inFirm(engagements.firmId, actor), visible, eq(tasks.assigneeId, actor.userId), inArray(tasks.status, TASK_OPEN)));
   return row?.n ?? 0;
 }

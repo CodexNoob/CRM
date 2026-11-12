@@ -84,8 +84,8 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
             <dl className="space-y-3 text-[13px]">
               {[
                 ["admin", "All clients, plus team management, settings and the audit log."],
-                ["partner", "All clients and engagements."],
-                ["preparer", "Only clients they created or own work for."],
+                ["manager", "All clients and engagements."],
+                ["employee", "Only clients they created or own work for."],
               ].map(([r, d]) => (
                 <div key={r}>
                   <dt className="font-medium text-ink">{ROLE_LABELS[r as keyof typeof ROLE_LABELS]}</dt>

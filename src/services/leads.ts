@@ -1,4 +1,5 @@
-import { and, desc, eq, gte, ilike, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, or, sql } from "drizzle-orm";
+import { LEAD_OPEN } from "@/lib/status";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@/db";
 import { leads, users, type Lead, type LeadStatus } from "@/db/schema";
@@ -14,7 +15,7 @@ import { createClient } from "./clients";
  * member may work them. Portal users never can.
  */
 
-export const OPEN_LEAD_STATUSES: LeadStatus[] = ["new", "contacted", "qualified"];
+export const OPEN_LEAD_STATUSES: LeadStatus[] = [...LEAD_OPEN];
 
 export interface LeadRow extends Lead {
   ownerName: string | null;
@@ -28,7 +29,7 @@ export async function listLeads(db: Db, actor: Actor, opts: { status?: LeadStatu
   const like = q ? `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : undefined;
   const statusFilter =
     opts.status === "open"
-      ? sql`${leads.status} in ('new', 'contacted', 'qualified')`
+      ? inArray(leads.status, LEAD_OPEN)
       : opts.status
         ? eq(leads.status, opts.status)
         : undefined;
