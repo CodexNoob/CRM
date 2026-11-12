@@ -78,6 +78,8 @@ async function personalNotifications(db: Db, actor: Actor): Promise<Notification
         or(
           and(eq(activities.type, "assignment"), sql`${activities.metadata} ->> 'userId' = ${actor.userId}`, or(isNull(activities.actorId), ne(activities.actorId, actor.userId))),
           and(sql`${activities.metadata} ->> 'kind' = 'ready_for_review'`, sql`${activities.metadata} ->> 'notifyUserId' = ${actor.userId}`),
+          // A client wrote (assignee or account manager is notified) / asked to change contact details.
+          and(sql`${activities.metadata} ->> 'kind' in ('message', 'profile_change_request')`, sql`${activities.metadata} ->> 'notifyUserId' = ${actor.userId}`),
         ),
       ),
     )
@@ -86,6 +88,14 @@ async function personalNotifications(db: Db, actor: Actor): Promise<Notification
   return rows.map((r) => {
     const title = typeof r.metadata?.title === "string" ? r.metadata.title : r.entityType === "task" ? "a task" : "an engagement";
     const href = r.entityType === "task" ? `/staff/tasks/${r.entityId}` : `/staff/engagements/${r.entityId}`;
+    const kind = typeof r.metadata?.kind === "string" ? r.metadata.kind : null;
+    if (kind === "message") {
+      const conv = typeof r.metadata?.conversationId === "string" ? r.metadata.conversationId : r.entityType === "conversation" ? r.entityId : null;
+      return { id: `msg-${r.id}`, label: "New message from a client", detail: typeof r.metadata?.subject === "string" ? r.metadata.subject : (r.actorName ?? "Client"), count: 1, href: conv ? `/staff/messages/${conv}` : "/staff/messages", tone: "info" as const };
+    }
+    if (kind === "profile_change_request") {
+      return { id: `profile-${r.id}`, label: "Client asked to update contact details", detail: "Review and update the client record", count: 1, href: r.entityType === "client" ? `/staff/clients/${r.entityId}?tab=activity` : "/staff/clients", tone: "warn" as const };
+    }
     if (r.type === "assignment") {
       return { id: `assign-${r.id}`, label: `You were assigned to ${title}`, detail: r.actorName ? `By ${r.actorName}` : r.entityType === "task" ? "Task" : "Engagement team", count: 1, href, tone: "info" as const };
     }

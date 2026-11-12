@@ -3,7 +3,7 @@ import { Receipt } from "lucide-react";
 import { getDb } from "@/db";
 import { SubscribeButton } from "@/components/invoice-client";
 import { Alert, Badge, Card, EmptyState, PageHeader } from "@/components/ui";
-import { requireClientActor } from "@/lib/auth/current";
+import { requirePortalContext } from "@/lib/auth/portal-context";
 import { formatDate, formatMoney } from "@/lib/labels";
 import { listPortalInvoices } from "@/services/invoices";
 import { listPortalSubscriptions } from "@/services/subscriptions";
@@ -30,7 +30,9 @@ const SUB_STATUS: Record<string, { label: string; tone: "warn" | "good" | "dange
 const day = (d: Date | null) => (d ? formatDate(d.toISOString().slice(0, 10)) : null);
 
 export default async function PortalInvoicesPage({ searchParams }: { searchParams: Promise<{ subscribed?: string }> }) {
-  const actor = await requireClientActor();
+  const { actor: portalActor, client } = await requirePortalContext();
+  // The invoice/subscription services authorize by actor.clientId: give them the server-resolved client.
+  const actor = { ...portalActor, clientId: client.clientId };
   const { subscribed } = await searchParams;
   const [invoices, subs] = await Promise.all([listPortalInvoices(getDb(), actor), listPortalSubscriptions(getDb(), actor)]);
   const open = invoices.filter((i) => i.payUrl);

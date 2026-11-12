@@ -10,6 +10,7 @@ import { Badge, cx } from "@/components/ui";
 import { idleState, type ActionState } from "@/lib/action-state";
 import { ACCEPT_ATTRIBUTE } from "@/lib/file-rules";
 import { formatBytes } from "@/lib/labels";
+import { DOCUMENT_STATUS_LABELS, DOCUMENT_STATUS_TONE, PORTAL_DOCUMENT_STATUS_LABELS } from "@/services/document-labels";
 
 export interface DocItem {
   id: string;
@@ -23,6 +24,10 @@ export interface DocItem {
   createdAt: string;
   clientName?: string;
   clientId?: string;
+  /** Optional collaboration fields (shown when present). */
+  title?: string | null;
+  status?: keyof typeof DOCUMENT_STATUS_LABELS;
+  reviewNote?: string | null;
 }
 
 type Action = (prev: ActionState, formData: FormData) => Promise<ActionState>;
@@ -120,7 +125,7 @@ export function DocumentList({ docs, staff, showClient }: { docs: DocItem[]; sta
             <div className="flex min-w-0 items-center gap-2.5">
               <FileText className="size-4 shrink-0 text-faint" aria-hidden />
               <div className="min-w-0">
-                <a href={`/api/documents/${d.id}`} className="block truncate font-medium text-ink hover:text-brand hover:underline">{d.fileName}</a>
+                <a href={staff ? `/staff/documents/${d.id}` : `/api/documents/${d.id}`} className="block truncate font-medium text-ink hover:text-brand hover:underline">{d.title || d.fileName}</a>
                 <div className="truncate text-[12px] text-muted">
                   {formatBytes(d.sizeBytes)}
                   {d.engagementTitle ? ` · ${d.engagementTitle}` : ""}
@@ -132,6 +137,9 @@ export function DocumentList({ docs, staff, showClient }: { docs: DocItem[]; sta
         ...(showClient ? [{ id: "client", header: "Client", sort: (d: DocItem) => d.clientName ?? "", hideBelow: "md" as const, cell: (d: DocItem) => <span className="text-ink">{d.clientName}</span> }] : []),
         { id: "from", header: "Uploaded by", sort: (d) => d.uploadedByName ?? "", hideBelow: "md", cell: (d) => <span className="text-muted">{d.uploadedByName ?? "—"}{d.uploadedByClient ? " (client)" : ""}</span> },
         ...(staff ? [{ id: "vis", header: "Visibility", sort: (d: DocItem) => (d.visibleToClient ? 1 : 0), hideBelow: "sm" as const, cell: (d: DocItem) => (d.visibleToClient ? <Badge tone="brand">Shared</Badge> : <Badge>Internal</Badge>) }] : []),
+        ...(docs.some((x) => x.status)
+          ? [{ id: "status", header: "Status", sort: (d: DocItem) => d.status ?? "", hideBelow: "sm" as const, cell: (d: DocItem) => (d.status ? <span title={!staff && d.reviewNote ? d.reviewNote : undefined}><Badge tone={DOCUMENT_STATUS_TONE[d.status]} dot>{(staff ? DOCUMENT_STATUS_LABELS : PORTAL_DOCUMENT_STATUS_LABELS)[d.status]}</Badge></span> : null) }]
+          : []),
         { id: "scan", header: "Scan", hideBelow: "lg", cell: (d) => <ScanBadge status={d.scanStatus} /> },
         { id: "added", header: "Added", sort: (d) => d.createdAt, align: "right", cell: (d) => <span className="tabular whitespace-nowrap text-muted">{dateFmt.format(new Date(d.createdAt))}</span> },
       ]}

@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { openDatabase, type Db, type DbHandle } from "@/db";
-import { users, type UserRole } from "@/db/schema";
+import { portalClientAccess, users, type UserRole } from "@/db/schema";
 import { actorFromUser, type Actor } from "@/lib/auth/actor";
 import { hashPassword } from "@/lib/auth/crypto";
 import { createClient } from "@/services/clients";
@@ -52,6 +52,10 @@ export async function createUser(
     })
     .returning();
   if (!user) throw new Error("no user");
+  // Portal logins act for clients listed in portal_client_access (as the invitation flow records).
+  if (user.role === "client" && user.clientId) {
+    await db.insert(portalClientAccess).values({ firmId: user.firmId, userId: user.id, clientId: user.clientId, role: "owner", status: "active" }).onConflictDoNothing();
+  }
   return actorFromUser(user);
 }
 

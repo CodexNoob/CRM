@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db";
 import { errorState, formValues, type ActionState } from "@/lib/action-state";
-import { requireClientActor, requireStaffActor } from "@/lib/auth/current";
+import { requireStaffActor } from "@/lib/auth/current";
+import { requirePortalContext } from "@/lib/auth/portal-context";
 import { formatMoney } from "@/lib/labels";
 import { cancelInvoice, createInvoice, refreshInvoice, sendInvoice } from "@/services/invoices";
 import { getPublicProfile } from "@/services/settings";
@@ -76,7 +77,9 @@ export async function subscriptionRowAction(id: string, clientId: string, op: "r
 
 /** Portal "Subscribe" button: sends the client to PayPal to approve the subscription. */
 export async function portalSubscribeAction(id: string, _prev: ActionState, _formData: FormData): Promise<ActionState> {
-  const actor = await requireClientActor();
+  // The client being viewed is resolved on the server from portal_client_access.
+  const ctx = await requirePortalContext();
+  const actor = { ...ctx.actor, clientId: ctx.client.clientId };
   let approveUrl: string;
   try {
     const db = getDb();

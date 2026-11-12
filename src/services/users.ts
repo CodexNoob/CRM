@@ -1,13 +1,14 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
+import { z } from "zod";
 import type { Db } from "@/db";
-import { invitations, users, type User } from "@/db/schema";
+import { invitations, portalClientAccess, users, type User } from "@/db/schema";
 import type { Actor, StaffRole } from "@/lib/auth/actor";
 import { generateToken, hashPassword, hashToken } from "@/lib/auth/crypto";
 import { invalidateUserSessions } from "@/lib/auth/sessions";
 import { AppError, ForbiddenError, ValidationError } from "@/lib/errors";
 import { parseInput, passwordSchema, portalInviteSchema } from "@/lib/validation";
 import { recordAudit } from "./audit";
-import { assertClientAccess, inFirm } from "./access";
+import { assertClientAccess, inFirm, requirePermission } from "./access";
 
 export const INVITATION_TTL_MS = 72 * 60 * 60 * 1000;
 
@@ -43,17 +44,28 @@ export async function issueInvitation(db: Db, userId: string, createdById: strin
  * Creates (or re-invites) a portal login for a client. Returns a one-time token
  * that staff send to the client as a link. The token is never stored in plain text.
  */
+const portalRoleSchema = z.enum(["owner", "contact", "viewer"], { error: "Choose an access role." }).default("contact");
+
+/**
+ * Creates (or re-invites) a portal login for a client and grants it access to that client
+ * (portal_client_access). If the email already belongs to a portal login of this firm — e.g. a
+ * bookkeeper for two businesses — that login is given access to this client too instead of
+ * creating a duplicate. Returns a one-time token that staff send to the person as a link;
+ * the token is never stored in plain text.
+ */
 export async function createPortalInvitation(
   db: Db,
   actor: Actor,
   clientId: string,
   input: unknown,
 ): Promise<{ token: string; userId: string }> {
+  requirePermission(actor, "client_portal", "invite_client");
   await assertClientAccess(db, actor, clientId);
   const data = parseInput(portalInviteSchema, input);
+  const role = parseInput(z.object({ role: portalRoleSchema }), { role: (input as Record<string, unknown> | null)?.role || undefined }).role;
   const existing = await findUserByEmail(db, data.email);
-  // Emails are unique across the whole service; the message never says which firm uses it.
-  if (existing && (existing.firmId !== actor.firmId || existing.role !== "client" || existing.clientId !== clientId)) {
+  // Emails are unique across the whole service; the message never says which firm or kind of account uses it.
+  if (existing && (existing.firmId !== actor.firmId || existing.role !== "client")) {
     throw new ValidationError({ email: ["This email is already used by another account."] });
   }
   if (existing && !existing.isActive) {
@@ -71,6 +83,10 @@ export async function createPortalInvitation(
       if (!created) throw new Error("Insert returned no row");
       userId = created.id;
     }
+    await t
+      .insert(portalClientAccess)
+      .values({ firmId: actor.firmId, userId, clientId, role, status: "active", grantedById: actor.userId })
+      .onConflictDoUpdate({ target: [portalClientAccess.userId, portalClientAccess.clientId], set: { status: "active", role, updatedAt: new Date() } });
     const token = await issueInvitation(t, userId, actor.userId);
     await recordAudit(t, {
       firmId: actor.firmId,
@@ -78,7 +94,7 @@ export async function createPortalInvitation(
       action: "portal.invite",
       entityType: "user",
       entityId: userId,
-      metadata: { clientId },
+      metadata: { clientId, role, existingLogin: !!existing },
     });
     return { token, userId };
   });
@@ -166,16 +182,22 @@ export async function acceptInvitation(db: Db, token: string, password: unknown,
   await invalidateUserSessions(db, invite.invite.userId);
 }
 
+/** Portal logins with access to a client (from portal_client_access, so contacts of several clients appear on each). */
 export async function listPortalUsers(db: Db, actor: Actor, clientId: string) {
   await assertClientAccess(db, actor, clientId);
-  return db
+  const rows = await db
     .select({
       id: users.id,
       name: users.name,
       email: users.email,
-      isActive: users.isActive,
+      userActive: users.isActive,
+      accessStatus: portalClientAccess.status,
+      role: portalClientAccess.role,
       hasPassword: sql<boolean>`${users.passwordHash} is not null`,
     })
-    .from(users)
-    .where(and(inFirm(users.firmId, actor), eq(users.clientId, clientId), eq(users.role, "client")));
+    .from(portalClientAccess)
+    .innerJoin(users, and(eq(users.id, portalClientAccess.userId), eq(users.firmId, portalClientAccess.firmId)))
+    .where(and(inFirm(portalClientAccess.firmId, actor), eq(portalClientAccess.clientId, clientId), eq(users.role, "client")));
+  // isActive = the login works AND access to this client isn't suspended.
+  return rows.map(({ userActive, accessStatus, ...r }) => ({ ...r, isActive: userActive && accessStatus === "active", accessStatus }));
 }

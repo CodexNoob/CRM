@@ -8,6 +8,7 @@ import { Badge, PageHeader, Panel, StatStrip } from "@/components/ui";
 import { getAccountingProvider } from "@/integrations/qbo";
 import { emailConfig } from "@/integrations/email";
 import { paypalConfig } from "@/integrations/paypal";
+import { dropboxSignConfig } from "@/integrations/dropbox-sign";
 import { requireStaffActor } from "@/lib/auth/current";
 
 export const metadata: Metadata = { title: "Integrations" };
@@ -33,6 +34,7 @@ export default async function IntegrationsPage() {
   const qbo = getAccountingProvider();
   const email = emailConfig();
   const pp = paypalConfig();
+  const sign = dropboxSignConfig();
 
   const rows: { name: string; icon: ReactNode; purpose: string; status: Status; detail: string }[] = [
     { name: "Database", icon: <Database />, purpose: "All CRM, portal and website data", ...db },
@@ -53,7 +55,17 @@ export default async function IntegrationsPage() {
         : "No email service configured; links are shared manually",
     },
     { name: "Malware scanning", icon: <ShieldCheck />, purpose: "Scan every uploaded document", status: "not_connected", detail: "No scanner connected; files show “Not scanned”" },
-    { name: "E-signature provider", icon: <FileSignature />, purpose: "Engagement letters, Form 8879", status: "not_connected", detail: "Provider not selected" },
+    {
+      name: "Dropbox Sign (e-signatures)",
+      icon: <FileSignature />,
+      purpose: "Engagement letters, authorizations, consent forms",
+      status: sign.isConfigured ? "connected" : "not_connected",
+      detail: !sign.isConfigured
+        ? "Not connected: add DROPBOX_SIGN_API_KEY and the webhook URL"
+        : sign.isEnabled
+          ? `Enabled${sign.testMode ? " · test mode (not legally binding)" : ""}`
+          : "Connected – testing (admins only, test mode)",
+    },
     {
       name: "PayPal",
       icon: <CreditCard />,

@@ -4,7 +4,7 @@ import { Briefcase, CalendarClock, CircleCheck, CreditCard, Mail, MessageSquare,
 import { getDb } from "@/db";
 import { staffMessageAction, staffUploadAction } from "@/app/actions/phase1";
 import { DocumentList, UploadForm } from "@/components/documents";
-import { MessageThread } from "@/components/message-thread";
+import { ClientConversations } from "@/app/staff/messages/client-conversations";
 import { SimpleTable, td, tdHide } from "@/components/table";
 import { Alert, Avatar, Badge, ButtonLink, DescriptionList, EmptyState, Panel, StatStrip, TabNav } from "@/components/ui";
 import { NewInvoiceForm, NewSubscriptionForm } from "@/components/invoice-client";
@@ -35,7 +35,7 @@ import { listClientDocuments } from "@/services/documents";
 import { listClientEngagements, listStaff } from "@/services/engagements";
 import { listClientInvoices, paypalProvider } from "@/services/invoices";
 import { ACTIVITY_LABELS, getClientTeam, listClientActivity } from "@/services/insights";
-import { getThread } from "@/services/messages";
+import { listClientConversations } from "@/services/messages";
 import { listTasks } from "@/services/tasks";
 import { listClientTimeline, listStatusHistory } from "@/services/timeline";
 import { listPortalUsers } from "@/services/users";
@@ -507,11 +507,18 @@ async function DocumentsTab({ actor, clientId, engagements }: { actor: Actor; cl
 }
 
 async function MessagesTab({ actor, clientId, clientName }: { actor: Actor; clientId: string; clientName: string }) {
-  const thread = await getThread(getDb(), actor, clientId);
+  const db = getDb();
+  const [convos, staff] = await Promise.all([listClientConversations(db, actor, clientId), listStaff(db, actor)]);
   return (
-    <Panel title={`Conversation with ${clientName}`} className="max-w-3xl">
-      <MessageThread messages={thread.map((m) => ({ ...m, createdAt: m.createdAt.toISOString() }))} action={staffMessageAction.bind(null, clientId)} emptyText="No messages yet. Your message will appear in the client’s portal." />
-    </Panel>
+    <ClientConversations
+      clientId={clientId}
+      clientName={clientName}
+      convos={convos}
+      staff={staff.map((s) => ({ id: s.id, name: s.name }))}
+      canCreate={can(actor, "messages", "create")}
+      canAssign={can(actor, "messages", "assign")}
+      quickAction={can(actor, "messages", "reply") ? staffMessageAction.bind(null, clientId) : null}
+    />
   );
 }
 

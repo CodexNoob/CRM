@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import type { DbHandle } from "@/db";
+import { portalClientAccess } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { listAuditEvents } from "@/services/audit";
@@ -153,11 +155,14 @@ describe("staff least privilege", () => {
     expect((await listAuditEvents(h.db, admin, "client", clientA.id)).length).toBeGreaterThan(0);
   });
 
-  it("will not attach a portal login for one client to another client", async () => {
+  it("inviting an existing portal login to another client adds access explicitly (no duplicate, no move); staff emails are refused", async () => {
     const { userId } = await createPortalInvitation(h.db, admin, clientA.id, { name: "A Spouse", email: "spouse-a@example.test" });
     expect(userId).toBeTruthy();
-    const err = await createPortalInvitation(h.db, admin, clientB.id, { name: "Imposter", email: "SPOUSE-A@example.test" }).catch((e) => e);
-    expect(err).toBeInstanceOf(ValidationError);
+    // Same firm, explicit staff action: the same login now also has access to client B — and still to A.
+    const second = await createPortalInvitation(h.db, admin, clientB.id, { name: "A Spouse", email: "SPOUSE-A@example.test" });
+    expect(second.userId).toBe(userId);
+    const access = await h.db.select({ clientId: portalClientAccess.clientId }).from(portalClientAccess).where(eq(portalClientAccess.userId, userId));
+    expect(access.map((a) => a.clientId).sort()).toEqual([clientA.id, clientB.id].sort());
     const staffEmail = await createPortalInvitation(h.db, admin, clientB.id, { name: "x", email: preparerA.email }).catch((e) => e);
     expect(staffEmail).toBeInstanceOf(ValidationError);
   });

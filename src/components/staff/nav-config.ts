@@ -58,7 +58,10 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       live("documents", "/staff/documents", "Documents", "documents", "Uploads, folders, document requests"),
       live("messages", "/staff/messages", "Messages", "messages", "Secure client communication", { badge: "unreadMessages" }),
-      planned("e-signatures", "E-Signatures", "esign", "Engagement letters and signature requests", { needs: "Choosing an e-signature provider (for example DocuSign, Dropbox Sign or Adobe Sign). The app will send documents for signature and store the signed copy and its audit trail. Signatures will not be captured inside this app." }),
+      // E-signatures stay "Soon" until Dropbox Sign is connected AND the firm has enabled it after testing.
+      process.env.DROPBOX_SIGN_ENABLED === "1" && !!process.env.DROPBOX_SIGN_API_KEY?.trim()
+        ? live("e-signatures", "/staff/e-signatures", "E-Signatures", "esign", "Engagement letters and signature requests via Dropbox Sign")
+        : planned("e-signatures", "E-Signatures", "esign", "Engagement letters and signature requests", { needs: "Connecting the Dropbox Sign e-signature provider (API key + webhook) and a successful test. Documents are sent for signature and signed on Dropbox Sign; the signed copy and its audit trail are stored here. Signatures are never captured or simulated inside this app." }),
       live("client-portal", "/staff/client-portal", "Client Portal", "portal", "Client-facing portal management"),
     ],
   },

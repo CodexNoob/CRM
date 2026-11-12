@@ -2,27 +2,37 @@ import type { Metadata } from "next";
 import { MessagesSquare } from "lucide-react";
 import { getDb } from "@/db";
 import { EmptyState, PageHeader } from "@/components/ui";
+import { can } from "@/lib/auth/permissions";
 import { requireStaffActor } from "@/lib/auth/current";
-import { listConversations } from "@/services/messages";
+import { listClientOptions } from "@/services/clients";
+import { listStaff } from "@/services/engagements";
+import { countInboxFolders, listInbox } from "@/services/messages";
 import { Inbox } from "./inbox";
+import { InboxShell, parseInbox, type InboxSearch } from "./inbox-shell";
+import { NewConversationButton } from "./message-controls";
 
 export const metadata: Metadata = { title: "Messages" };
+export const dynamic = "force-dynamic";
 
-export default async function MessagesPage() {
+export default async function MessagesPage({ searchParams }: { searchParams: Promise<InboxSearch> }) {
   const actor = await requireStaffActor();
-  const convos = await listConversations(getDb(), actor);
-  const unread = convos.reduce((n, c) => n + c.unread, 0);
+  const db = getDb();
+  const { folder, params, filters } = parseInbox(await searchParams);
+  const [convos, counts, clients, staff] = await Promise.all([listInbox(db, actor, filters), countInboxFolders(db, actor), listClientOptions(db, actor), listStaff(db, actor)]);
+  const staffOptions = staff.map((s) => ({ id: s.id, name: s.name }));
+
   return (
     <>
-      <PageHeader title="Messages" description={unread ? `${unread} unread message${unread === 1 ? "" : "s"} from clients.` : "Secure conversations with your clients."} />
-      <div className="grid overflow-hidden rounded-lg border border-line bg-surface lg:h-[calc(100dvh-11rem)] lg:grid-cols-[22rem_1fr]">
-        <div className="overflow-y-auto border-line lg:border-r">
-          <Inbox convos={convos} />
-        </div>
+      <PageHeader
+        title="Messages"
+        description={counts.unread ? `${counts.unread} unread message${counts.unread === 1 ? "" : "s"} from clients.` : "Secure conversations with your clients."}
+        actions={can(actor, "messages", "create") ? <NewConversationButton clients={clients} staff={staffOptions} canAssign={can(actor, "messages", "assign")} /> : undefined}
+      />
+      <InboxShell counts={counts} folder={folder} params={params} clients={clients} staff={staffOptions} list={<Inbox convos={convos} />}>
         <div className="hidden items-center justify-center lg:flex">
-          <EmptyState icon={<MessagesSquare />} title="Select a conversation">Choose a client on the left to read and reply.</EmptyState>
+          <EmptyState icon={<MessagesSquare />} title="Select a conversation">Choose a conversation to read and reply.</EmptyState>
         </div>
-      </div>
+      </InboxShell>
     </>
   );
 }

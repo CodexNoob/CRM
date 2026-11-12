@@ -6,7 +6,11 @@ import { errorState, formValues, type ActionState } from "@/lib/action-state";
 import { requireClientActor, requireStaffActor } from "@/lib/auth/current";
 import { ValidationError } from "@/lib/errors";
 import { cancelAppointment, createAppointment } from "@/services/calendar";
+import { documents } from "@/db/schema";
+import { requirePortalContext } from "@/lib/auth/portal-context";
 import { archiveDocument, setDocumentShared, uploadDocument } from "@/services/documents";
+
+const DOCUMENT_CATEGORIES = documents.category.enumValues;
 import { sendMessage } from "@/services/messages";
 
 /* Every action re-authenticates; the services re-authorize every record. */
@@ -25,11 +29,22 @@ export async function staffUploadAction(clientId: string, _prev: ActionState, fo
   const actor = await requireStaffActor();
   try {
     const file = await fileFromForm(formData);
-    const engagementId = formData.get("engagementId");
+    const str = (k: string) => {
+      const v = formData.get(k);
+      return typeof v === "string" && v.trim() ? v.trim() : undefined;
+    };
+    const visibility = str("visibility");
+    const category = str("category");
     await uploadDocument(getDb(), actor, {
       clientId,
-      engagementId: typeof engagementId === "string" && engagementId ? engagementId : undefined,
+      engagementId: str("engagementId"),
+      taxPreparationCaseId: str("taxPreparationCaseId"),
+      taxReturnId: str("taxReturnId"),
       visibleToClient: formData.get("visibleToClient") === "on",
+      visibility: visibility === "internal_only" || visibility === "client_visible" || visibility === "shared_with_client" ? visibility : undefined,
+      category: category && (DOCUMENT_CATEGORIES as readonly string[]).includes(category) ? (category as (typeof DOCUMENT_CATEGORIES)[number]) : undefined,
+      title: str("title"),
+      taxYear: str("taxYear") && /^\d{4}$/.test(str("taxYear")!) ? Number(str("taxYear")) : undefined,
       ...file,
     });
   } catch (error) {
@@ -62,11 +77,12 @@ export async function archiveDocumentAction(id: string, _prev: ActionState, _for
   return { status: "success" };
 }
 
+/** Portal upload. The client is the one resolved on the server for this portal session — never a value from the form. */
 export async function portalUploadAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const actor = await requireClientActor();
+  const ctx = await requirePortalContext();
   try {
     const file = await fileFromForm(formData);
-    await uploadDocument(getDb(), actor, { clientId: actor.clientId!, ...file });
+    await uploadDocument(getDb(), ctx.actor, { clientId: ctx.client.clientId, ...file });
   } catch (error) {
     return errorState(error);
   }

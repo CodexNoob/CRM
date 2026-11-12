@@ -153,7 +153,8 @@ describe("firm B's lists, counts and search never include firm A", () => {
   it("firm A still sees its own data", async () => {
     expect(JSON.stringify(await listClients(h.db, adminA))).toContain("Alpha Client");
     expect(JSON.stringify(await globalSearch(h.db, adminA, "Alpha"))).toContain("Alpha");
-    expect(await countUnreadForStaff(h.db, adminA)).toBeGreaterThan(0);
+    // Unread is per person: adminA replied (and so read the thread); firm A's preparer hasn't.
+    expect(await countUnreadForStaff(h.db, prepA)).toBeGreaterThan(0);
   });
 });
 

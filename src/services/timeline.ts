@@ -12,7 +12,7 @@ import type { Actor } from "@/lib/auth/actor";
  */
 
 export type EntityType = "lead" | "client" | "engagement" | "task" | "tax_preparation" | "tax_return";
-export type CounterKind = "lead" | "client" | "engagement" | "task";
+export type CounterKind = "lead" | "client" | "engagement" | "task" | "document" | "document_request" | "conversation" | "signature_request";
 
 /** Next number for a firm. Atomic (single upsert), so concurrent inserts never share a number. */
 export async function nextNumber(db: Db, firmId: string, kind: CounterKind): Promise<number> {

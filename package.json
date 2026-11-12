@@ -23,7 +23,8 @@
     "user:invite": "tsx scripts/invite-user.ts",
     "email:test": "tsx scripts/email-test.ts",
     "paypal:test": "tsx scripts/paypal-test.ts",
-    "firm:check": "tsx scripts/firm-check.ts"
+    "firm:check": "tsx scripts/firm-check.ts",
+    "files:migrate": "tsx scripts/migrate-files-to-supabase.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",

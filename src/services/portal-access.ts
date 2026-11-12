@@ -1,10 +1,10 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, max, sql } from "drizzle-orm";
 import type { Db } from "@/db";
-import { clients, portalClientAccess, users } from "@/db/schema";
+import { auditEvents, clients, portalClientAccess, users } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { isUuid } from "@/lib/validation";
-import { assertClientAccess, inFirm, requirePermission } from "./access";
+import { assertClientAccess, inFirm, requirePermission, visibleClientsCondition } from "./access";
 import { recordAudit } from "./audit";
 
 /**
@@ -67,12 +67,20 @@ export interface PortalAccessRow {
   clientName: string;
   role: PortalClient["role"];
   status: "active" | "suspended";
+  lastSignIn: Date | null;
 }
 
+/** One row per (portal user × client), limited to clients the staff member can see. */
 export async function listPortalAccess(db: Db, actor: Actor, clientId?: string): Promise<PortalAccessRow[]> {
   requirePermission(actor, "client_portal", "view");
   if (clientId) await assertClientAccess(db, actor, clientId);
-  return db
+  const lastLogin = db
+    .select({ userId: auditEvents.actorUserId, at: max(auditEvents.createdAt).as("at") })
+    .from(auditEvents)
+    .where(and(inFirm(auditEvents.firmId, actor), eq(auditEvents.action, "auth.login")))
+    .groupBy(auditEvents.actorUserId)
+    .as("last_login");
+  const rows = await db
     .select({
       userId: users.id,
       userName: users.name,
@@ -83,12 +91,21 @@ export async function listPortalAccess(db: Db, actor: Actor, clientId?: string):
       clientName: clients.displayName,
       role: portalClientAccess.role,
       status: portalClientAccess.status,
+      lastSignIn: lastLogin.at,
     })
     .from(portalClientAccess)
-    .innerJoin(users, eq(users.id, portalClientAccess.userId))
-    .innerJoin(clients, eq(clients.id, portalClientAccess.clientId))
-    .where(and(inFirm(portalClientAccess.firmId, actor), clientId ? eq(portalClientAccess.clientId, clientId) : undefined))
+    .innerJoin(users, and(eq(users.id, portalClientAccess.userId), eq(users.firmId, portalClientAccess.firmId)))
+    .innerJoin(clients, and(eq(clients.id, portalClientAccess.clientId), eq(clients.firmId, portalClientAccess.firmId)))
+    .leftJoin(lastLogin, eq(lastLogin.userId, users.id))
+    .where(and(inFirm(portalClientAccess.firmId, actor), visibleClientsCondition(db, actor), clientId ? eq(portalClientAccess.clientId, clientId) : undefined))
     .orderBy(asc(clients.displayName), asc(users.name));
+  return rows.map((r) => ({ ...r, lastSignIn: r.lastSignIn ? new Date(r.lastSignIn) : null }));
+}
+
+/** Portal accounts of the firm whose clients the staff member can see (for "grant access to another client"). */
+export async function listPortalUsersForGrant(db: Db, actor: Actor): Promise<{ userId: string; name: string; email: string }[]> {
+  const rows = await listPortalAccess(db, actor);
+  return [...new Map(rows.map((r) => [r.userId, { userId: r.userId, name: r.userName, email: r.email }])).values()];
 }
 
 function sqlHasPassword() {
