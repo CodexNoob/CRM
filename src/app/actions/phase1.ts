@@ -1,0 +1,158 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { getDb } from "@/db";
+import { errorState, formValues, type ActionState } from "@/lib/action-state";
+import { requireClientActor, requireStaffActor } from "@/lib/auth/current";
+import { ValidationError } from "@/lib/errors";
+import { cancelAppointment, createAppointment } from "@/services/calendar";
+import { archiveDocument, setDocumentShared, uploadDocument } from "@/services/documents";
+import { convertLead, createLead, updateLead } from "@/services/leads";
+import { sendMessage } from "@/services/messages";
+
+/* Every action re-authenticates; the services re-authorize every record. */
+
+async function fileFromForm(formData: FormData): Promise<{ fileName: string; data: Buffer }> {
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) throw new ValidationError({ file: ["Choose a file to upload."] });
+  return { fileName: file.name, data: Buffer.from(await file.arrayBuffer()) };
+}
+
+/* ───────── Leads ───────── */
+
+export async function createLeadAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const actor = await requireStaffActor();
+  let id: string;
+  try {
+    id = (await createLead(getDb(), actor, formValues(formData))).id;
+  } catch (error) {
+    return errorState(error, formData);
+  }
+  redirect(`/staff/leads/${id}`);
+}
+
+export async function updateLeadAction(id: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const actor = await requireStaffActor();
+  try {
+    await updateLead(getDb(), actor, id, formValues(formData));
+  } catch (error) {
+    return errorState(error, formData);
+  }
+  revalidatePath("/staff/leads", "layout");
+  return { status: "success", message: "Lead saved." };
+}
+
+export async function convertLeadAction(id: string, _prev: ActionState, _formData: FormData): Promise<ActionState> {
+  const actor = await requireStaffActor();
+  let clientId: string;
+  try {
+    clientId = (await convertLead(getDb(), actor, id)).clientId;
+  } catch (error) {
+    return errorState(error);
+  }
+  redirect(`/staff/clients/${clientId}`);
+}
+
+/* ───────── Documents ───────── */
+
+export async function staffUploadAction(clientId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const actor = await requireStaffActor();
+  try {
+    const file = await fileFromForm(formData);
+    const engagementId = formData.get("engagementId");
+    await uploadDocument(getDb(), actor, {
+      clientId,
+      engagementId: typeof engagementId === "string" && engagementId ? engagementId : undefined,
+      visibleToClient: formData.get("visibleToClient") === "on",
+      ...file,
+    });
+  } catch (error) {
+    return errorState(error);
+  }
+  revalidatePath(`/staff/clients/${clientId}`);
+  revalidatePath("/staff/documents");
+  return { status: "success", message: "File uploaded." };
+}
+
+export async function setDocumentSharedAction(id: string, shared: boolean, _prev: ActionState, _formData: FormData): Promise<ActionState> {
+  const actor = await requireStaffActor();
+  try {
+    await setDocumentShared(getDb(), actor, id, shared === true);
+  } catch (error) {
+    return errorState(error);
+  }
+  revalidatePath("/staff", "layout");
+  return { status: "success" };
+}
+
+export async function archiveDocumentAction(id: string, _prev: ActionState, _formData: FormData): Promise<ActionState> {
+  const actor = await requireStaffActor();
+  try {
+    await archiveDocument(getDb(), actor, id);
+  } catch (error) {
+    return errorState(error);
+  }
+  revalidatePath("/staff", "layout");
+  return { status: "success" };
+}
+
+export async function portalUploadAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const actor = await requireClientActor();
+  try {
+    const file = await fileFromForm(formData);
+    await uploadDocument(getDb(), actor, { clientId: actor.clientId!, ...file });
+  } catch (error) {
+    return errorState(error);
+  }
+  revalidatePath("/portal", "layout");
+  return { status: "success", message: "Thanks, your file was uploaded securely." };
+}
+
+/* ───────── Messages ───────── */
+
+export async function staffMessageAction(clientId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const actor = await requireStaffActor();
+  try {
+    await sendMessage(getDb(), actor, formData.get("body"), clientId);
+  } catch (error) {
+    return errorState(error, formData);
+  }
+  revalidatePath("/staff/messages", "layout");
+  return { status: "success" };
+}
+
+export async function portalMessageAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const actor = await requireClientActor();
+  try {
+    await sendMessage(getDb(), actor, formData.get("body"));
+  } catch (error) {
+    return errorState(error, formData);
+  }
+  revalidatePath("/portal", "layout");
+  return { status: "success" };
+}
+
+/* ───────── Calendar ───────── */
+
+export async function createAppointmentAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const actor = await requireStaffActor();
+  try {
+    await createAppointment(getDb(), actor, formValues(formData));
+  } catch (error) {
+    return errorState(error, formData);
+  }
+  revalidatePath("/staff/calendar");
+  return { status: "success", message: "Appointment added." };
+}
+
+export async function cancelAppointmentAction(id: string, _prev: ActionState, _formData: FormData): Promise<ActionState> {
+  const actor = await requireStaffActor();
+  try {
+    await cancelAppointment(getDb(), actor, id);
+  } catch (error) {
+    return errorState(error);
+  }
+  revalidatePath("/staff/calendar");
+  return { status: "success" };
+}

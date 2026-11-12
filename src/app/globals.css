@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. Every component uses these names, never raw hex values,
+ * so the whole product can be re-themed from this one block.
+ */
+@theme {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Brand */
+  --color-brand: #1f3a56;
+  --color-brand-strong: #172d43;
+  --color-brand-ink: #1f3a56;
+  --color-brand-soft: #e8edf3;
+
+  /* Neutrals */
+  --color-page: #f5f6f8;
+  --color-surface: #ffffff;
+  --color-subtle: #f3f4f6;
+  --color-hover: #f7f8fa;
+  --color-line: #e5e7eb;
+  --color-line-strong: #d1d5db;
+  --color-ink: #202b38;
+  --color-muted: #6b7280;
+  --color-faint: #9ca3af;
+
+  /* Status */
+  --color-success: #16845b;
+  --color-success-soft: #e7f4ee;
+  --color-warning: #d69a32;
+  --color-warning-ink: #8a5a0b;
+  --color-warning-soft: #fbf3e4;
+  --color-danger: #d94b4b;
+  --color-danger-ink: #b42f2f;
+  --color-danger-soft: #fbeaea;
+  --color-info: #2f6fb0;
+  --color-info-soft: #e9f1fa;
+
+  /* Shape: 6–10px radii, no large rounding */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 10px;
+
+  /* Minimal elevation */
+  --shadow-sm: 0 1px 2px rgb(16 24 40 / 0.04);
+  --shadow-md: 0 4px 12px rgb(16 24 40 / 0.06), 0 1px 2px rgb(16 24 40 / 0.04);
+  --shadow-lg: 0 12px 32px rgb(16 24 40 / 0.1), 0 2px 6px rgb(16 24 40 / 0.05);
+  --shadow-xl: 0 12px 32px rgb(16 24 40 / 0.1), 0 2px 6px rgb(16 24 40 / 0.05);
+}
+
+/* The product uses one light theme; `dark:` utilities never apply. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+html {
+  scroll-behavior: smooth;
+  color-scheme: light;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  background: var(--color-page);
+  color: var(--color-ink);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Visible, consistent keyboard focus everywhere. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+/* Compact tabular figures in data-dense areas. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}

@@ -1,0 +1,7 @@
+{
+  // This project uses PostgreSQL (Supabase). The SQL Server extension would flag
+  // valid PostgreSQL in drizzle/*.sql (DO $$ ... $$, FOREACH, format('%I')) as errors.
+  "mssql.intelliSense.enableIntelliSense": false,
+  "mssql.intelliSense.enableErrorChecking": false,
+  "mssql.intelliSense.enableSuggestions": false
+}
