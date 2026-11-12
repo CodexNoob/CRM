@@ -1,5 +1,5 @@
 import { getDb } from "@/db";
-import { getCurrentActor } from "@/lib/auth/current";
+import { getCurrentActor, getCurrentFirmAccess } from "@/lib/auth/current";
 import { NotFoundError } from "@/lib/errors";
 import { getDocumentForDownload } from "@/services/documents";
 
@@ -11,6 +11,8 @@ import { getDocumentForDownload } from "@/services/documents";
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const actor = await getCurrentActor();
   if (!actor) return new Response("Not found", { status: 404 });
+  // Staff of a firm whose subscription has lapsed are limited to the Subscription page; clients keep access.
+  if (actor.role !== "client" && (await getCurrentFirmAccess(actor.firmId)).locked) return new Response("Subscription required", { status: 402 });
   try {
     const { doc, data } = await getDocumentForDownload(getDb(), actor, (await params).id);
     const asciiName = doc.fileName.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");

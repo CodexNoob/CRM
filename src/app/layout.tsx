@@ -7,7 +7,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "sw
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.APP_URL ?? "http://localhost:3000"),
   title: { default: "Client Workspace", template: "%s · Client Workspace" },
-  description: "Practice management and secure client portal.",
+  description: "Personal CRM and secure client portal.",
   robots: { index: false, follow: false },
 };
 

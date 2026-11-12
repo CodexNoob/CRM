@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@/db";
-import { announcements, firmProfile } from "@/db/schema";
+import { announcements, firmProfile, firms } from "@/db/schema";
 import { site, announcements as defaultAnnouncements } from "@/content/site";
 import type { Actor } from "@/lib/auth/actor";
 import { ForbiddenError, NotFoundError } from "@/lib/errors";
@@ -118,6 +118,8 @@ export async function saveFirmProfile(db: Db, actor: Actor, input: unknown) {
     updatedAt: new Date(),
   };
   await db.insert(firmProfile).values({ firmId: actor.firmId, ...values }).onConflictDoUpdate({ target: firmProfile.firmId, set: values });
+  // Keep the firm's account name in step with its public name (the page address /f/<slug> stays the same).
+  await db.update(firms).set({ name: d.name, updatedAt: values.updatedAt }).where(eq(firms.id, actor.firmId));
   await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "settings.firm_profile", entityType: "settings", entityId: "firm_profile" });
 }
 

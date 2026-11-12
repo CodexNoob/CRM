@@ -16,6 +16,7 @@ export async function notifyNewInquiry(lead: { id: string; name: string; service
   if (!cfg.isConfigured || !cfg.inquiryTo) return;
 
   const service = lead.serviceInterest ? (SERVICE_LABELS[lead.serviceInterest as keyof typeof SERVICE_LABELS] ?? "Not specified") : "Not sure yet";
+  // Callers must only invoke this for the firm that owns INQUIRY_NOTIFY_EMAIL (see actions/public.ts).
   const link = `${appUrl()}/staff/leads/${lead.id}`;
   // Keep the name single-line and short so it can't reshape the subject.
   const name = lead.name.replace(/[\r\n]+/g, " ").slice(0, 80);

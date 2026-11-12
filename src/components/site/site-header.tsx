@@ -10,13 +10,14 @@ const nav = [
   { href: "#contact", label: "Contact" },
 ];
 
-export function SiteHeader({ name = site.name }: { name?: string }) {
+export function SiteHeader({ name = site.name, homeHref = "/" }: { name?: string; homeHref?: string }) {
+  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || site.shortName;
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-surface/90 backdrop-blur supports-backdrop-filter:bg-surface/75">
       <div className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-4">
-        <Link href="/" className="flex items-center gap-2 font-semibold text-ink">
+        <Link href={homeHref} className="flex items-center gap-2 font-semibold text-ink">
           <span aria-hidden className="flex size-8 items-center justify-center rounded-md bg-brand text-sm font-bold text-white">
-            {site.shortName}
+            {initials}
           </span>
           <span>{name}</span>
         </Link>

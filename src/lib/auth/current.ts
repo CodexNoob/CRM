@@ -3,6 +3,7 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db";
+import { firmAccess, syncFirmBilling, type FirmAccess } from "@/services/firm-billing";
 import type { Actor } from "./actor";
 import { SESSION_ABSOLUTE_MS, validateSessionToken } from "./sessions";
 
@@ -17,10 +18,23 @@ export const getCurrentActor = cache(async (): Promise<Actor | null> => {
   return validateSessionToken(getDb(), token);
 });
 
-export async function requireStaffActor(): Promise<Actor> {
+/** The signed-in staff member's firm access (trial / active / locked), refreshed from PayPal at most every few minutes. */
+export const getCurrentFirmAccess = cache(async (firmId: string): Promise<FirmAccess> => {
+  const firm = await syncFirmBilling(getDb(), firmId);
+  return firmAccess(firm);
+});
+
+/**
+ * Every staff page and Server Action calls this. When the firm's trial has ended or its
+ * subscription has lapsed, every page and action redirects to the dashboard, where the
+ * staff layout shows the subscription modal that cannot be closed (and renders no CRM data).
+ * Only the dashboard, the shared layout and the subscription actions pass `allowLocked`.
+ */
+export async function requireStaffActor(opts: { allowLocked?: boolean } = {}): Promise<Actor> {
   const actor = await getCurrentActor();
   if (!actor) redirect("/login");
   if (actor.role === "client") redirect("/portal");
+  if (!opts.allowLocked && (await getCurrentFirmAccess(actor.firmId)).locked) redirect("/staff");
   return actor;
 }
 

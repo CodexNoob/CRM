@@ -8,6 +8,7 @@ import { MAX_FAILED_LOGINS, LOCKOUT_MS } from "@/lib/auth/login";
 import { SESSION_ABSOLUTE_MS, SESSION_IDLE_MS } from "@/lib/auth/sessions";
 import { formatDate } from "@/lib/labels";
 import { firmToday } from "@/services/dashboard";
+import { getFirm } from "@/services/firms";
 import { getPublicProfile, listAllAnnouncements } from "@/services/settings";
 import { AnnouncementToggle, FirmProfileForm, NewAnnouncementForm } from "./settings-forms";
 
@@ -22,7 +23,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const requested = (await searchParams).tab;
   const tab: Tab = requested && requested in TABS ? (requested as Tab) : "profile";
   const db = getDb();
-  const [profile, list] = await Promise.all([getPublicProfile(db, actor.firmId), listAllAnnouncements(db, actor)]);
+  const [profile, list, firm] = await Promise.all([getPublicProfile(db, actor.firmId), listAllAnnouncements(db, actor), getFirm(db, actor.firmId)]);
 
   const security: [string, string, boolean][] = [
     ["Role-based access", "Admin, partner, preparer and client roles, enforced on the server for every record", true],
@@ -39,7 +40,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   return (
     <>
       <PageHeader title="Settings" description="Firm profile, public website content and security posture." />
-      <div className="mb-5">
+      <Alert tone="info">
+        Your firm’s public page (with its inquiry form):{" "}
+        <a href={`/f/${firm.slug}`} target="_blank" rel="noopener noreferrer" className="font-medium underline underline-offset-2">
+          {`${(process.env.APP_URL ?? "").replace(/\/$/, "")}/f/${firm.slug}`}
+        </a>
+      </Alert>
+      <div className="mt-5 mb-5">
         <TabNav label="Settings sections" items={(Object.keys(TABS) as Tab[]).map((t) => ({ href: t === "profile" ? "/staff/settings" : `/staff/settings?tab=${t}`, label: TABS[t], active: tab === t }))} />
       </div>
 

@@ -5,7 +5,7 @@ import { after } from "next/server";
 import { notifyNewInquiry } from "@/services/notifications";
 import { getDb } from "@/db";
 import { errorState, formValues, type ActionState } from "@/lib/action-state";
-import { getDefaultFirm } from "@/services/firms";
+import { getDefaultFirm, getFirmBySlug } from "@/services/firms";
 import { SpamRejectedError, submitWebsiteInquiry } from "@/services/leads";
 
 /**
@@ -34,12 +34,16 @@ export async function submitInquiryAction(_prev: ActionState, formData: FormData
     const ip = (h.get("x-forwarded-for") ?? "").split(",")[0]!.trim() || h.get("x-real-ip") || "unknown";
     if (!allow(ip)) throw new SpamRejectedError();
     const db = getDb();
-    // The home page (and its form) belongs to the default firm until per-firm pages exist.
-    const firm = await getDefaultFirm(db);
+    // Each firm's public page sends its own slug; an unknown slug is treated like spam (generic error).
+    const slug = formData.get("firm");
+    const firm = typeof slug === "string" && /^[a-z0-9-]{1,60}$/.test(slug) ? await getFirmBySlug(db, slug).catch(() => null) : null;
     if (!firm) throw new SpamRejectedError();
     const lead = await submitWebsiteInquiry(db, firm.id, formValues(formData));
     // Send the staff alert after the response, so the visitor never waits on (or sees) email problems.
-    after(() => notifyNewInquiry(lead));
+    // INQUIRY_NOTIFY_EMAIL is the operator's own inbox, so it is alerted only for the default firm's
+    // inquiries. Other firms see theirs in their CRM (per-firm email alerts need a verified sending domain).
+    const defaultFirm = await getDefaultFirm(db);
+    if (defaultFirm?.id === firm.id) after(() => notifyNewInquiry(lead));
   } catch (error) {
     return errorState(error, formData);
   }

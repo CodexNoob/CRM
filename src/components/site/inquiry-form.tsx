@@ -16,13 +16,13 @@ const CONSENT_MESSAGE = "Please check the box to agree to be contacted before se
  * field, a fill-time check (set in the browser, since this page is static), and
  * server-side rate limits. No account is created.
  */
-export function InquiryForm() {
+export function InquiryForm({ firmSlug }: { firmSlug: string }) {
   // Changing the key remounts the form: empty fields, fresh state, new fill-time start.
   const [formKey, setFormKey] = useState(0);
-  return <InquiryFormBody key={formKey} onSendAnother={() => setFormKey((k) => k + 1)} />;
+  return <InquiryFormBody key={formKey} firmSlug={firmSlug} onSendAnother={() => setFormKey((k) => k + 1)} />;
 }
 
-function InquiryFormBody({ onSendAnother }: { onSendAnother: () => void }) {
+function InquiryFormBody({ firmSlug, onSendAnother }: { firmSlug: string; onSendAnother: () => void }) {
   const successRef = useRef<HTMLDivElement>(null);
   // When the visitor first saw the form. Kept in a ref (not a hidden input) because React
   // resets the form after each submit, which used to blank the field and make retries look like bots.
@@ -38,6 +38,7 @@ function InquiryFormBody({ onSendAnother }: { onSendAnother: () => void }) {
       return { status: "error", fieldErrors: { consent: [CONSENT_MESSAGE] }, values: formValues(formData) };
     }
     formData.set("startedAt", String(startedAt.current));
+    formData.set("firm", firmSlug);
     return submitInquiryAction(prev, formData);
   }, idleState);
 

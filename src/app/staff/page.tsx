@@ -4,7 +4,7 @@ import { CalendarClock, CircleCheck, Plug } from "lucide-react";
 import { getDb } from "@/db";
 import { SimpleTable, td, tdHide } from "@/components/table";
 import { Badge, ButtonLink, EmptyState, Panel, SegmentedLinks, StatStrip } from "@/components/ui";
-import { requireStaffActor } from "@/lib/auth/current";
+import { getCurrentFirmAccess, requireStaffActor } from "@/lib/auth/current";
 import { formatDate, formatMoney, ROLE_LABELS, STATUS_LABELS } from "@/lib/labels";
 import { dueLabel, ENGAGEMENT_TONE } from "@/lib/status";
 import { DUE_SOON_DAYS, firmToday, getDashboard } from "@/services/dashboard";
@@ -23,7 +23,9 @@ function greeting(now: Date) {
 }
 
 export default async function StaffDashboard({ searchParams }: { searchParams: Promise<{ view?: string }> }) {
-  const actor = await requireStaffActor();
+  // Locked firms land here; the layout shows the subscription modal and no CRM data is loaded.
+  const actor = await requireStaffActor({ allowLocked: true });
+  if ((await getCurrentFirmAccess(actor.firmId)).locked) return <div aria-hidden className="min-h-[60vh]" />;
   const { view } = await searchParams;
   const mine = view === "mine";
   const now = new Date();

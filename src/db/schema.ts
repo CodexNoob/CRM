@@ -69,10 +69,25 @@ export const firms = pgTable(
     slug: text("slug").notNull(),
     status: firmStatus("status").notNull().default("trial"),
     trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
+    /* The firm's subscription to this software (PayPal Subscriptions, paid to the operator). */
+    billingInterval: text("billing_interval"), // "month" | "year"
+    paypalSubscriptionId: text("paypal_subscription_id"),
+    /** When PayPal will next charge (active subscriptions). */
+    nextBillingAt: timestamp("next_billing_at", { withTimezone: true }),
+    billingSyncedAt: timestamp("billing_synced_at", { withTimezone: true }),
     ...timestamps,
   },
-  (t) => [uniqueIndex("firms_slug_unique").on(t.slug)],
+  (t) => [uniqueIndex("firms_slug_unique").on(t.slug), uniqueIndex("firms_paypal_subscription_unique").on(t.paypalSubscriptionId)],
 ).enableRLS();
+
+/** The operator's PayPal plans for selling this software (one per billing interval), created on first use. */
+export const platformPlans = pgTable("platform_plans", {
+  interval: text("interval").primaryKey(), // "month" | "year"
+  amountCents: integer("amount_cents").notNull(),
+  currency: text("currency").notNull(),
+  paypalPlanId: text("paypal_plan_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}).enableRLS();
 
 const firmId = () =>
   uuid("firm_id")

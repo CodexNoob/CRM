@@ -10,6 +10,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  CreditCard,
   Funnel,
   LogOut,
   Menu as MenuIcon,
@@ -147,7 +148,7 @@ function WorkspaceBrand({ workspace }: { workspace: ShellProps["workspace"] }) {
       </span>
       <span className="min-w-0">
         <span className="block truncate text-[13px] font-semibold leading-tight">{workspace.name}</span>
-        <span className="block text-[11px] leading-tight text-white/50">Practice workspace</span>
+        <span className="block text-[11px] leading-tight text-white/50">Personal workspace</span>
       </span>
     </Link>
   );
@@ -155,6 +156,8 @@ function WorkspaceBrand({ workspace }: { workspace: ShellProps["workspace"] }) {
 
 function UserMenu({ user, compact }: { user: ShellProps["user"]; compact?: boolean }) {
   const formRef = useRef<HTMLFormElement>(null);
+  // Opens the subscription modal over whatever page is showing.
+  const pathname = usePathname();
   return (
     <>
       <form ref={formRef} action={logoutAction} className="hidden" />
@@ -177,7 +180,12 @@ function UserMenu({ user, compact }: { user: ShellProps["user"]; compact?: boole
         items={[
           { type: "label", label: user.email },
           { label: "Dashboard", href: "/staff" },
-          ...(user.isAdmin ? [{ label: "Settings", icon: <Settings />, href: "/staff/settings" }] : []),
+          ...(user.isAdmin
+            ? [
+                { label: "Subscription", icon: <CreditCard />, href: `${pathname}?subscription=1` },
+                { label: "Settings", icon: <Settings />, href: "/staff/settings" },
+              ]
+            : []),
           { type: "separator" },
           { label: "Sign out", icon: <LogOut />, danger: true, onSelect: () => formRef.current?.requestSubmit() },
         ]}
