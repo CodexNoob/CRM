@@ -22,6 +22,7 @@ export type Module =
   | "tax_returns"
   | "bookkeeping"
   | "calendar"
+  | "integrations"
   | "documents"
   | "messages"
   | "esignatures"
@@ -44,9 +45,14 @@ const ALL: readonly Action[] = [
 ];
 
 const ROLE_PERMISSIONS: Record<Actor["role"], Matrix> = {
+  super_admin: {
+    leads: ALL, clients: ALL, engagements: ALL, tasks: ALL, templates: ALL, billing: ALL, team: ALL, settings: ALL, reports: ALL,
+    tax_preparation: ALL, tax_returns: ALL, bookkeeping: ALL, calendar: ALL, integrations: ["view"],
+    documents: ALL, messages: ALL, esignatures: ALL, client_portal: ALL,
+  },
   admin: {
     leads: ALL, clients: ALL, engagements: ALL, tasks: ALL, templates: ALL, billing: ALL, team: ALL, settings: ALL, reports: ALL,
-    tax_preparation: ALL, tax_returns: ALL, bookkeeping: ALL, calendar: ALL,
+    tax_preparation: ALL, tax_returns: ALL, bookkeeping: ALL, calendar: ALL, integrations: ["view"],
     documents: ALL, messages: ALL, esignatures: ALL, client_portal: ALL,
   },
   // Managers run the practice: approvals, assignment, closing engagements, templates. No firm settings or team admin.
@@ -58,6 +64,7 @@ const ROLE_PERMISSIONS: Record<Actor["role"], Matrix> = {
     templates: ["view", "create", "edit", "manage"],
     billing: ["view", "create", "edit"],
     reports: ["view", "export"],
+    integrations: ["view"],
     tax_preparation: ["view", "create", "edit", "assign", "approve", "manage"],
     tax_returns: ["view", "create", "edit", "assign", "approve", "file", "manage"],
     bookkeeping: ["view", "create", "edit", "assign", "approve", "manage", "post", "reconcile", "close_period", "reopen_period"],
@@ -76,6 +83,7 @@ const ROLE_PERMISSIONS: Record<Actor["role"], Matrix> = {
     templates: ["view"],
     billing: ["view", "create"],
     reports: ["view"],
+    integrations: ["view"],
     tax_preparation: ["view", "create", "edit"],
     tax_returns: ["view", "create", "edit", "approve"],
     bookkeeping: ["view", "create", "edit"],
@@ -88,7 +96,7 @@ const ROLE_PERMISSIONS: Record<Actor["role"], Matrix> = {
   },
   // Auditors / observers: see everything in the firm, change nothing. Billing is excluded on purpose.
   read_only: {
-    leads: ["view"], clients: ["view"], engagements: ["view"], tasks: ["view"], templates: ["view"], reports: ["view"],
+    leads: ["view"], clients: ["view"], engagements: ["view"], tasks: ["view"], templates: ["view"], reports: ["view"], integrations: ["view"],
     tax_preparation: ["view"], tax_returns: ["view"], bookkeeping: ["view"], calendar: ["view"],
     // Read-only users see that documents/messages exist but may not download file contents.
     documents: ["view"], messages: ["view"], esignatures: ["view"], client_portal: ["view"],
@@ -105,7 +113,7 @@ export function can(actor: Pick<Actor, "role">, module: Module, action: Action):
 export function permissionsFor(actor: Pick<Actor, "role">): Record<Module, Action[]> {
   const m = ROLE_PERMISSIONS[actor.role] ?? {};
   return Object.fromEntries(
-    (["leads", "clients", "engagements", "tasks", "templates", "billing", "team", "settings", "reports", "tax_preparation", "tax_returns", "bookkeeping", "calendar", "documents", "messages", "esignatures", "client_portal"] as Module[])
+    (["leads", "clients", "engagements", "tasks", "templates", "billing", "team", "settings", "reports", "tax_preparation", "tax_returns", "bookkeeping", "calendar", "integrations", "documents", "messages", "esignatures", "client_portal"] as Module[])
       .map((k) => [k, [...(m[k] ?? [])]]),
   ) as Record<Module, Action[]>;
 }

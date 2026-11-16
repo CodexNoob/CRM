@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getDb } from "@/db";
 import { errorState, formValues, type ActionState } from "@/lib/action-state";
 import { requireStaffActor } from "@/lib/auth/current";
+import { resolveFirmContext } from "@/services/firms";
 import { changeStaffRole, inviteStaff, sendStaffSignInLink, setStaffActive } from "@/services/team";
 
 function signInLink(token: string): string {
@@ -14,8 +15,9 @@ function signInLink(token: string): string {
 const LINK_NOTE = "Send this link to them through a trusted channel. It works once and expires in 72 hours.";
 
 export async function inviteStaffAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const actor = await requireStaffActor();
+  const signedInActor = await requireStaffActor();
   try {
+    const actor = await resolveFirmContext(getDb(), signedInActor, String(formData.get("firmId") ?? ""));
     const { token } = await inviteStaff(getDb(), actor, formValues(formData));
     revalidatePath("/staff/team");
     return { status: "success", message: `Invitation created. ${LINK_NOTE}`, data: { link: signInLink(token) } };
@@ -24,9 +26,10 @@ export async function inviteStaffAction(_prev: ActionState, formData: FormData):
   }
 }
 
-export async function sendStaffLinkAction(userId: string, _prev: ActionState, _formData: FormData): Promise<ActionState> {
-  const actor = await requireStaffActor();
+export async function sendStaffLinkAction(userId: string, firmId: string, _prev: ActionState, _formData: FormData): Promise<ActionState> {
+  const signedInActor = await requireStaffActor();
   try {
+    const actor = await resolveFirmContext(getDb(), signedInActor, firmId);
     const { token } = await sendStaffSignInLink(getDb(), actor, userId);
     return { status: "success", message: `New sign-in link created; earlier links no longer work. ${LINK_NOTE}`, data: { link: signInLink(token) } };
   } catch (error) {
@@ -34,9 +37,10 @@ export async function sendStaffLinkAction(userId: string, _prev: ActionState, _f
   }
 }
 
-export async function setStaffActiveAction(userId: string, active: boolean, _prev: ActionState, _formData: FormData): Promise<ActionState> {
-  const actor = await requireStaffActor();
+export async function setStaffActiveAction(userId: string, active: boolean, firmId: string, _prev: ActionState, _formData: FormData): Promise<ActionState> {
+  const signedInActor = await requireStaffActor();
   try {
+    const actor = await resolveFirmContext(getDb(), signedInActor, firmId);
     await setStaffActive(getDb(), actor, userId, active === true);
   } catch (error) {
     return errorState(error);
@@ -46,8 +50,9 @@ export async function setStaffActiveAction(userId: string, active: boolean, _pre
 }
 
 export async function changeStaffRoleAction(userId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
-  const actor = await requireStaffActor();
+  const signedInActor = await requireStaffActor();
   try {
+    const actor = await resolveFirmContext(getDb(), signedInActor, String(formData.get("firmId") ?? ""));
     await changeStaffRole(getDb(), actor, userId, formData.get("role"));
   } catch (error) {
     return errorState(error);

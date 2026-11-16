@@ -1,49 +1,51 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { product, PLAN_INTERVALS } from "@/content/product";
 import { buttonClass } from "@/components/ui";
 import { CheckIcon, LockIcon } from "@/components/site/icons";
 import { formatMoney } from "@/lib/labels";
-import { site } from "@/content/site";
 import { getDb } from "@/db";
 import { ContactSection } from "@/components/site/contact-section";
-import { getDefaultFirm } from "@/services/firms";
-import { getPublicProfile, type PublicFirmProfile } from "@/services/settings";
+import { getPlatformProfile, type PlatformProfile } from "@/services/settings";
 
-/** Contact details come from the operator's own firm (the default firm). Cached for 5 minutes. */
+/** The product site uses only the platform operator's identity. Cached for 5 minutes. */
 export const revalidate = 300;
 
-/** The operator's contact card. Messages sent from the home page become leads in the default firm's CRM. */
-async function loadContact(): Promise<{ profile: PublicFirmProfile; firmSlug: string } | null> {
-  const fallback: PublicFirmProfile = {
-    name: site.name,
-    phone: site.contact.phone,
-    email: site.contact.email,
-    addressLines: [...site.contact.addressLines],
-    hours: site.contact.hours,
-    tagline: site.tagline,
-    fromDatabase: false,
-  };
+async function loadPlatformProfile(): Promise<PlatformProfile> {
   try {
-    const db = getDb();
-    const firm = await getDefaultFirm(db);
-    if (!firm) return null; // before first-run setup there is nowhere to deliver messages
-    return { profile: await getPublicProfile(db, firm.id), firmSlug: firm.slug };
+    return await getPlatformProfile(getDb());
   } catch (error) {
     const e = error as { name?: string; code?: string; cause?: { code?: string } };
-    console.error("Home page contact fell back to defaults", { name: e?.name, code: e?.code ?? e?.cause?.code });
-    return { profile: fallback, firmSlug: "my-firm" };
+    console.error("Platform profile could not be loaded", { name: e?.name, code: e?.code ?? e?.cause?.code });
+    return {
+      name: product.name,
+      description: product.description,
+      websiteUrl: "",
+      officialEmail: "",
+      phone: "",
+      addressLine1: "",
+      addressLine2: "",
+      salesEmail: "",
+      supportEmail: "",
+      supportPhone: "",
+      logoDataUrl: null,
+      fromDatabase: false,
+    };
   }
 }
 
-/** The product's marketing page: what the CRM does, pricing, and sign-up. Firms' own sites live at /f/<slug>. */
-export const metadata: Metadata = {
-  title: { absolute: `${product.name} | ${product.tagline}` },
-  description: product.description,
+/** The product's marketing page: what the CRM does, pricing, and sign-up. */
+export async function generateMetadata(): Promise<Metadata> {
+  const profile = await loadPlatformProfile();
+  return {
+  title: { absolute: `${profile.name} | ${product.tagline}` },
+  description: profile.description,
   robots: { index: true, follow: true },
   alternates: { canonical: "/" },
-  openGraph: { type: "website", title: product.name, description: product.description, siteName: product.name },
-};
+  openGraph: { type: "website", title: profile.name, description: profile.description, siteName: profile.name },
+  };
+}
 
 const faqs: [string, string][] = [
   ["Do I need a credit card for the free trial?", `No. Your ${product.trialDays}-day trial starts as soon as you sign up. Subscribe from inside the CRM whenever you’re ready.`],
@@ -54,7 +56,7 @@ const faqs: [string, string][] = [
 
 
 export default async function ProductHome() {
-  const contact = await loadContact();
+  const profile = await loadPlatformProfile();
   return (
     <>
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-surface focus:px-3 focus:py-2">
@@ -63,14 +65,20 @@ export default async function ProductHome() {
       <header className="sticky top-0 z-30 border-b border-line bg-surface/90 backdrop-blur supports-backdrop-filter:bg-surface/75">
         <div className="mx-auto flex h-16 max-w-6xl items-center gap-4 px-4">
           <Link href="/" className="flex items-center gap-2 font-semibold text-ink">
-            <span aria-hidden className="flex size-8 items-center justify-center rounded-md bg-brand text-sm font-bold text-white">MY</span>
-            <span>{product.name}</span>
+            {profile.logoDataUrl ? (
+              <Image src={profile.logoDataUrl} alt="" width={32} height={32} unoptimized className="size-8 rounded-md object-contain" />
+            ) : (
+              <span aria-hidden className="flex size-8 items-center justify-center rounded-md bg-brand text-sm font-bold text-white">
+                {profile.name.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]!.toUpperCase()).join("") || "CRM"}
+              </span>
+            )}
+            <span>{profile.name}</span>
           </Link>
           <nav aria-label="Main" className="ml-auto hidden items-center gap-1 text-sm md:flex">
             <a href="#features" className="rounded-md px-3 py-2 text-muted hover:bg-subtle hover:text-ink">Features</a>
             <a href="#pricing" className="rounded-md px-3 py-2 text-muted hover:bg-subtle hover:text-ink">Pricing</a>
             <a href="#faq" className="rounded-md px-3 py-2 text-muted hover:bg-subtle hover:text-ink">FAQ</a>
-            {contact ? <a href="#contact" className="rounded-md px-3 py-2 text-muted hover:bg-subtle hover:text-ink">Contact</a> : null}
+            <a href="#contact" className="rounded-md px-3 py-2 text-muted hover:bg-subtle hover:text-ink">Contact</a>
           </nav>
           <div className="ml-auto flex items-center gap-2 md:ml-0">
             <Link href="/login" className={buttonClass("ghost")}>Sign in</Link>
@@ -86,7 +94,7 @@ export default async function ProductHome() {
             {product.trialDays}-day free trial · no card required
           </p>
           <h1 className="mx-auto mt-5 max-w-3xl text-4xl font-semibold tracking-tight text-ink sm:text-5xl">{product.tagline}</h1>
-          <p className="mx-auto mt-5 max-w-2xl text-lg text-muted">{product.description}</p>
+          <p className="mx-auto mt-5 max-w-2xl text-lg text-muted">{profile.description}</p>
           <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
             <Link href="/signup" className={buttonClass("primary", "min-h-12 px-6 text-base")}>Start your free trial</Link>
             <a href="#pricing" className={buttonClass("secondary", "min-h-12 px-6 text-base")}>See pricing</a>
@@ -165,23 +173,19 @@ export default async function ProductHome() {
           </div>
         </section>
 
-        {contact ? (
-          <ContactSection
-            profile={contact.profile}
-            firmSlug={contact.firmSlug}
-            title="Contact us"
-            intro={`Questions about ${product.name}, pricing or setting up your firm? Send us a message and we’ll get back to you within one business day, or reach us directly.`}
-            emailSubject={`Question about ${product.name}`}
-          />
-        ) : null}
+        <ContactSection
+          profile={profile}
+          title="Contact us"
+          intro={`Questions about ${profile.name}, pricing or setting up your firm? Send us a message and we’ll get back to you within one business day, or reach us directly.`}
+        />
       </main>
 
       <footer className="border-t border-white/10 bg-brand-strong text-white [&_a:focus-visible]:outline-white">
         <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-8 text-sm text-white/75 sm:flex-row sm:items-center sm:justify-between">
-          <p>© {new Date().getFullYear()} {product.name}</p>
+          <p>© {new Date().getFullYear()} {profile.name}</p>
           <nav aria-label="Footer" className="flex flex-wrap gap-4">
             <a href="#pricing" className="hover:text-white">Pricing</a>
-            {contact ? <a href="#contact" className="hover:text-white">Contact</a> : null}
+            <a href="#contact" className="hover:text-white">Contact</a>
             <Link href="/signup" className="hover:text-white">Start free trial</Link>
             <Link href="/login" className="hover:text-white">Sign in</Link>
           </nav>

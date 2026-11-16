@@ -4,25 +4,27 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { submitInquiryAction } from "@/app/actions/public";
 import { FormMessage, SelectField, SubmitButton, TextField, textareaClass } from "@/components/form";
 import { formValues, idleState, type ActionState } from "@/lib/action-state";
-import { SERVICE_LABELS } from "@/lib/labels";
 import { buttonClass } from "@/components/ui";
 
-const serviceOptions = Object.entries(SERVICE_LABELS).map(([value, label]) => ({ value, label }));
+const topicOptions = [
+  { value: "sales", label: "Sales and pricing" },
+  { value: "technical_support", label: "Technical support" },
+  { value: "general", label: "General question" },
+];
 
 const CONSENT_MESSAGE = "Please check the box to agree to be contacted before sending your message.";
 
 /**
- * Public inquiry form → creates a Lead in the CRM. Anti-abuse: hidden honeypot
- * field, a fill-time check (set in the browser, since this page is static), and
- * server-side rate limits. No account is created.
+ * Public contact form for the CRM operator. Requests are stored separately from
+ * subscribing firms' leads and are visible only to Super Admins.
  */
-export function InquiryForm({ firmSlug }: { firmSlug: string }) {
+export function InquiryForm() {
   // Changing the key remounts the form: empty fields, fresh state, new fill-time start.
   const [formKey, setFormKey] = useState(0);
-  return <InquiryFormBody key={formKey} firmSlug={firmSlug} onSendAnother={() => setFormKey((k) => k + 1)} />;
+  return <InquiryFormBody key={formKey} onSendAnother={() => setFormKey((k) => k + 1)} />;
 }
 
-function InquiryFormBody({ firmSlug, onSendAnother }: { firmSlug: string; onSendAnother: () => void }) {
+function InquiryFormBody({ onSendAnother }: { onSendAnother: () => void }) {
   const successRef = useRef<HTMLDivElement>(null);
   // When the visitor first saw the form. Kept in a ref (not a hidden input) because React
   // resets the form after each submit, which used to blank the field and make retries look like bots.
@@ -38,7 +40,6 @@ function InquiryFormBody({ firmSlug, onSendAnother }: { firmSlug: string; onSend
       return { status: "error", fieldErrors: { consent: [CONSENT_MESSAGE] }, values: formValues(formData) };
     }
     formData.set("startedAt", String(startedAt.current));
-    formData.set("firm", firmSlug);
     return submitInquiryAction(prev, formData);
   }, idleState);
 
@@ -71,18 +72,19 @@ function InquiryFormBody({ firmSlug, onSendAnother }: { firmSlug: string; onSend
         <TextField name="name" label="Name" autoComplete="name" required state={state} />
         <TextField name="email" label="Email" type="email" inputMode="email" autoComplete="email" required state={state} />
         <TextField name="phone" label="Phone (optional)" type="tel" inputMode="tel" autoComplete="tel" state={state} />
-        <SelectField name="serviceInterest" label="I need help with" state={state} options={serviceOptions} placeholder="Not sure yet" />
+        <SelectField name="topic" label="Topic" required state={state} options={topicOptions} placeholder="Choose a topic" />
       </div>
       <div className="flex flex-1 flex-col gap-1.5">
-        <label htmlFor="message" className="block text-[12.5px] font-medium text-ink">How can we help? (optional)</label>
+        <label htmlFor="message" className="block text-[12.5px] font-medium text-ink">How can we help?</label>
         <textarea
           id="message"
           name="message"
           rows={3}
           maxLength={2000}
+          required
           defaultValue={state.values?.message}
           className={`${textareaClass} flex-1 resize-none`}
-          placeholder="Please don’t include Social Security or account numbers."
+          placeholder="Please don’t include passwords, tax documents, or other sensitive information."
         />
       </div>
       <label

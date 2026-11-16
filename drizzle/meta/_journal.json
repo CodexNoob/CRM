@@ -148,6 +148,20 @@
       "when": 1794468851090,
       "tag": "0020_client_collaboration",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794472263821,
+      "tag": "0021_smiling_synch",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794796328461,
+      "tag": "0022_numerous_iron_patriot",
+      "breakpoints": true
     }
   ]
 }

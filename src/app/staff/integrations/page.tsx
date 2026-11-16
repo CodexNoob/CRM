@@ -10,6 +10,7 @@ import { emailConfig } from "@/integrations/email";
 import { paypalConfig } from "@/integrations/paypal";
 import { dropboxSignConfig } from "@/integrations/dropbox-sign";
 import { requireStaffActor } from "@/lib/auth/current";
+import { requirePermission } from "@/services/access";
 
 export const metadata: Metadata = { title: "Integrations" };
 export const dynamic = "force-dynamic";
@@ -29,7 +30,8 @@ async function databaseStatus(): Promise<{ status: Status; detail: string }> {
 }
 
 export default async function IntegrationsPage() {
-  await requireStaffActor();
+  const actor = await requireStaffActor();
+  requirePermission(actor, "integrations", "view");
   const db = await databaseStatus();
   const qbo = getAccountingProvider();
   const email = emailConfig();

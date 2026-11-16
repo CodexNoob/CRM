@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
@@ -31,7 +32,7 @@ export interface ShellProps {
   sections: NavSection[];
   badges: Record<string, number>;
   initialCollapsed: boolean;
-  workspace: { name: string; initials: string };
+  workspace: { name: string; initials: string; logoDataUrl?: string | null };
   user: { name: string; email: string; roleLabel: string; isAdmin: boolean };
   notifications: { id: string; label: string; detail: string; count: number; href: string; tone: "danger" | "warn" | "info" }[];
   children: ReactNode;
@@ -143,12 +144,16 @@ function SidebarNav({ sections, badges, collapsed, onNavigate }: { sections: Nav
 function WorkspaceBrand({ workspace }: { workspace: ShellProps["workspace"] }) {
   return (
     <Link href="/staff" className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1 py-1.5 text-white hover:bg-white/5">
-      <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-md bg-white text-[11px] font-bold text-brand">
-        {workspace.initials}
-      </span>
+      {workspace.logoDataUrl ? (
+        <Image src={workspace.logoDataUrl} alt="" width={28} height={28} unoptimized className="size-7 shrink-0 rounded-md bg-white object-contain" />
+      ) : (
+        <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-md bg-white text-[11px] font-bold text-brand">
+          {workspace.initials}
+        </span>
+      )}
       <span className="min-w-0">
         <span className="block truncate text-[13px] font-semibold leading-tight">{workspace.name}</span>
-        <span className="block text-[11px] leading-tight text-white/50">Personal workspace</span>
+        <span className="block text-[11px] leading-tight text-white/50">Organization workspace</span>
       </span>
     </Link>
   );

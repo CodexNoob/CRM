@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
+import { Plus } from "lucide-react";
 import {
   approveTaxReturnAction,
   createTaxDocumentTemplateAction,
@@ -17,7 +18,9 @@ import {
   updateTaxReturnPreparationDataAction,
 } from "@/app/actions/tax";
 import { staffUploadAction } from "@/app/actions/phase1";
+import { Dialog } from "@/components/dialog";
 import { FormMessage, SelectField, SubmitButton, TextField } from "@/components/form";
+import { buttonClass } from "@/components/ui";
 import { idleState } from "@/lib/action-state";
 import type { TaxChecklistStatus, TaxPreparationStatus } from "@/db/schema";
 import { TAX_CHECKLIST_STATUS_LABELS, TAX_PREPARATION_STATUS_LABELS } from "@/lib/labels";
@@ -38,25 +41,44 @@ export function CreateTaxPreparationForm({
   staff: { id: string; name: string }[];
   defaultTaxYear: number;
 }) {
+  const [open, setOpen] = useState(false);
   const [state, action] = useActionState(createTaxPreparationCaseAction, idleState);
   return (
-    <form action={action} className="space-y-3">
-      <FormMessage state={state} />
-      <SelectField name="clientId" label="Client" required state={state} options={clients.map((c) => ({ value: c.id, label: c.name }))} placeholder="Choose a client" />
-      <SelectField name="engagementId" label="Related tax engagement" state={state} options={engagements.map((e) => ({ value: e.id, label: `${e.clientName} · ${e.title}` }))} placeholder="No engagement" hint="If selected, the engagement must match the selected client and tax service." />
-      <TextField name="taxYear" label="Tax year" type="number" required state={state} defaultValue={String(defaultTaxYear)} />
-      <TextField name="taxPeriod" label="Tax period" required state={state} defaultValue="annual" hint="For example, annual or Q1 2026." />
-      <TextField name="jurisdiction" label="Jurisdiction" required state={state} placeholder="Enter the applicable jurisdiction" />
-      <TextField name="taxFormType" label="Tax form" required state={state} placeholder="Enter the applicable form" />
-      <SelectField name="serviceType" label="Tax service" required state={state} options={serviceOptions} />
-      <SelectField name="filingType" label="Filing type" required state={state} defaultValue="original" options={[{ value: "original", label: "Original" }, { value: "amended", label: "Amended" }]} />
-      <TextField name="returnSequence" label="Return sequence" type="number" required state={state} defaultValue="1" />
-      <SelectField name="preparerId" label="Preparer" required state={state} options={staff.map((s) => ({ value: s.id, label: s.name }))} placeholder="Choose a preparer" />
-      <SelectField name="reviewerId" label="Reviewer" state={state} options={staff.map((s) => ({ value: s.id, label: s.name }))} placeholder="Choose later" />
-      <TextField name="dueDate" label="Filing deadline" type="date" state={state} hint="Use a verified deadline; the system does not invent statutory due dates." />
-      <TextField name="internalNotes" label="Internal notes" state={state} />
-      <SubmitButton className="w-full">Create preparation case</SubmitButton>
-    </form>
+    <>
+      <button type="button" className={buttonClass("primary")} onClick={() => setOpen(true)}>
+        <Plus /> Create preparation case
+      </button>
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title="New preparation case"
+        description="Enter the tax return details and assign a preparer."
+        size="lg"
+      >
+        <form action={action} className="space-y-3">
+          <FormMessage state={state} />
+          <SelectField name="clientId" label="Client" required state={state} options={clients.map((c) => ({ value: c.id, label: c.name }))} placeholder="Choose a client" />
+          <SelectField name="engagementId" label="Related tax engagement" state={state} options={engagements.map((e) => ({ value: e.id, label: `${e.clientName} · ${e.title}` }))} placeholder="No engagement" hint="If selected, the engagement must match the selected client and tax service." />
+          <TextField name="taxYear" label="Tax year" type="number" required state={state} defaultValue={String(defaultTaxYear)} />
+          <TextField name="taxPeriod" label="Tax period" required state={state} defaultValue="annual" hint="For example, annual or Q1 2026." />
+          <TextField name="jurisdiction" label="Jurisdiction" required state={state} placeholder="Enter the applicable jurisdiction" />
+          <TextField name="taxFormType" label="Tax form" required state={state} placeholder="Enter the applicable form" />
+          <SelectField name="serviceType" label="Tax service" required state={state} options={serviceOptions} />
+          <SelectField name="filingType" label="Filing type" required state={state} defaultValue="original" options={[{ value: "original", label: "Original" }, { value: "amended", label: "Amended" }]} />
+          <TextField name="returnSequence" label="Return sequence" type="number" required state={state} defaultValue="1" />
+          <SelectField name="preparerId" label="Preparer" required state={state} options={staff.map((s) => ({ value: s.id, label: s.name }))} placeholder="Choose a preparer" />
+          <SelectField name="reviewerId" label="Reviewer" state={state} options={staff.map((s) => ({ value: s.id, label: s.name }))} placeholder="Choose later" />
+          <TextField name="dueDate" label="Filing deadline" type="date" state={state} hint="Use a verified deadline; the system does not invent statutory due dates." />
+          <TextField name="internalNotes" label="Internal notes" state={state} />
+          <div className="flex justify-end gap-2 border-t border-line pt-3">
+            <button type="button" className={buttonClass("secondary")} onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+            <SubmitButton pendingText="Creating…">Create preparation case</SubmitButton>
+          </div>
+        </form>
+      </Dialog>
+    </>
   );
 }
 

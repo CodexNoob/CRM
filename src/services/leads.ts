@@ -381,10 +381,10 @@ export const INQUIRY_MIN_FILL_MS = 3000;
 export const INQUIRY_MAX_PER_EMAIL_PER_HOUR = 3;
 
 /**
- * Creates a lead from the public website. Anti-abuse: a hidden honeypot field,
- * a minimum fill time, and a per-email hourly cap (per-IP limiting is applied
- * by the caller). No account is created. The caller sends the staff alert email.
- * `firmId` is the firm whose public page the form is on (there is no signed-in actor).
+ * Creates a lead from a trusted firm-owned inquiry integration. Anti-abuse: a
+ * hidden honeypot field, a minimum fill time, and a per-email hourly cap (per-IP
+ * limiting is applied by the caller). No account is created. `firmId` must be
+ * resolved by the server; it is not taken from unauthenticated form input.
  */
 export async function submitWebsiteInquiry(
   db: Db,

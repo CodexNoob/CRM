@@ -3,8 +3,11 @@ import { getDb } from "@/db";
 import { SimpleTable, td } from "@/components/table";
 import { Alert, PageHeader, Panel, StatStrip } from "@/components/ui";
 import { requireStaffActor } from "@/lib/auth/current";
+import { FirmScopePicker } from "@/components/staff/firm-scope-picker";
 import { LEAD_SOURCE_LABELS, LEAD_STATUS_LABELS, SERVICE_LABELS, STATUS_LABELS } from "@/lib/labels";
 import { getPracticeReport } from "@/services/practice";
+import { listPlatformFirms, resolveFirmContext } from "@/services/firms";
+import { requirePermission } from "@/services/access";
 
 export const metadata: Metadata = { title: "Financial Reports" };
 
@@ -27,15 +30,21 @@ function Bars({ rows, label }: { rows: { name: string; value: number }[]; label:
   );
 }
 
-export default async function ReportsPage() {
+export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ firmId?: string }> }) {
   const actor = await requireStaffActor();
-  const r = await getPracticeReport(getDb(), actor);
+  requirePermission(actor, "reports", "view");
+  const db = getDb();
+  const params = await searchParams;
+  const scope = await resolveFirmContext(db, actor, params.firmId);
+  const firms = actor.role === "super_admin" ? await listPlatformFirms(db, actor) : [];
+  const r = await getPracticeReport(db, scope);
   const totalLeads = r.leads.reduce((n, l) => n + l.count, 0);
   const converted = r.leads.find((l) => l.status === "converted")?.count ?? 0;
 
   return (
     <>
       <PageHeader title="Financial Reports" description="Practice performance from CRM data." />
+      {actor.role === "super_admin" ? <FirmScopePicker action="/staff/reports" currentFirmId={scope.firmId} firms={firms} /> : null}
       <div className="mb-5">
         <Alert tone="warning" title="Revenue reporting requires QuickBooks Online">
           Revenue, outstanding balances and payment history come from QuickBooks, which is not connected yet. No financial figures are shown until it is.

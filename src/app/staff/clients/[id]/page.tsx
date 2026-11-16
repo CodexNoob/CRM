@@ -13,6 +13,7 @@ import { SubscriptionTable } from "@/components/subscription-table";
 import { listClientSubscriptions } from "@/services/subscriptions";
 import { isManagerOrAdmin, type Actor } from "@/lib/auth/actor";
 import { requireStaffActor } from "@/lib/auth/current";
+import { FirmScopePicker } from "@/components/staff/firm-scope-picker";
 import { can } from "@/lib/auth/permissions";
 import {
   CLIENT_STATUS_LABELS,
@@ -39,6 +40,7 @@ import { listClientConversations } from "@/services/messages";
 import { listTasks } from "@/services/tasks";
 import { listClientTimeline, listStatusHistory } from "@/services/timeline";
 import { listPortalUsers } from "@/services/users";
+import { listPlatformFirms, resolveFirmContext } from "@/services/firms";
 import { ArchiveClientButton, ContactsPanel, OnboardingChecklist } from "./client-controls";
 import { ClientTimeline } from "./client-timeline";
 import { PortalInviteForm } from "./portal-invite-form";
@@ -59,14 +61,16 @@ const TAB_LABELS: Record<Tab, string> = {
 };
 const timeFmt = new Intl.DateTimeFormat("en-US", { timeZone: process.env.FIRM_TIMEZONE || "America/New_York", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 
-export default async function ClientPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; converted?: string }> }) {
-  const actor = await requireStaffActor();
+export default async function ClientPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; converted?: string; firmId?: string }> }) {
+  const signedInActor = await requireStaffActor();
   const { id } = await params;
   const sp = await searchParams;
+  const db = getDb();
+  const actor = await resolveFirmContext(db, signedInActor, sp.firmId);
+  const firms = signedInActor.role === "super_admin" ? await listPlatformFirms(db, signedInActor) : [];
   const canBilling = can(actor, "billing", "view");
   const tabs = TABS.filter((t) => t !== "billing" || canBilling);
   const tab: Tab = (tabs as readonly string[]).includes(sp.tab ?? "") ? (sp.tab as Tab) : "overview";
-  const db = getDb();
   const client = await orNotFound(getClient(db, actor, id));
   const today = firmToday();
   const [engagements, team, portalUsers, openTasks, summary, contacts, staff] = await Promise.all([
@@ -80,6 +84,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
   ]);
   const openEngagements = engagements.filter((e) => !ENGAGEMENT_DONE.includes(e.status));
   const base = `/staff/clients/${client.id}`;
+  const firmQuery = signedInActor.role === "super_admin" ? `&firmId=${encodeURIComponent(actor.firmId)}` : "";
   const portalActive = portalUsers.some((u) => u.isActive && u.hasPassword);
   const staffNames = Object.fromEntries(staff.map((s) => [s.id, s.name]));
   const canEdit = can(actor, "clients", "edit");
@@ -109,6 +114,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
         </Alert>
       ) : null}
       {archived ? <Alert tone="warning">This client is archived. It is hidden from the client list; all history is kept.</Alert> : null}
+      {tab === "billing" && signedInActor.role === "super_admin" ? <FirmScopePicker action="/staff/invoices" currentFirmId={actor.firmId} firms={firms} /> : null}
 
       <div className="rounded-lg border border-line bg-surface">
         <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-start sm:justify-between">
@@ -169,7 +175,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
           <TabNav
             label="Client sections"
             items={tabs.map((t) => ({
-              href: t === "overview" ? base : `${base}?tab=${t}`,
+              href: t === "overview" ? `${base}${signedInActor.role === "super_admin" ? `?firmId=${encodeURIComponent(actor.firmId)}` : ""}` : `${base}?tab=${t}${firmQuery}`,
               label: TAB_LABELS[t],
               active: tab === t,
               count: t === "engagements" ? engagements.length : t === "tasks" ? openTasks.length : t === "contacts" ? contacts.length || undefined : undefined,
@@ -241,7 +247,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
 
       {tab === "documents" ? <DocumentsTab actor={actor} clientId={client.id} engagements={engagements.map((e) => ({ id: e.id, title: e.title }))} /> : null}
       {tab === "messages" ? <MessagesTab actor={actor} clientId={client.id} clientName={client.displayName} /> : null}
-      {tab === "billing" && canBilling ? <BillingTab actor={actor} clientId={client.id} clientEmail={client.email} engagements={engagements} today={today} /> : null}
+      {tab === "billing" && canBilling ? <BillingTab actor={actor} clientId={client.id} clientEmail={client.email} engagements={engagements} today={today} firmId={actor.firmId} /> : null}
       {tab === "activity" ? <ActivityTab actor={actor} clientId={client.id} staffNames={staffNames} /> : null}
     </div>
   );
@@ -528,12 +534,14 @@ async function BillingTab({
   clientEmail,
   engagements,
   today,
+  firmId,
 }: {
   actor: Actor;
   clientId: string;
   clientEmail: string | null;
   engagements: { id: string; title: string; taxYear: number | null }[];
   today: string;
+  firmId: string;
 }) {
   const provider = paypalProvider();
   const canCreate = can(actor, "billing", "create");
@@ -542,7 +550,7 @@ async function BillingTab({
     <div className="grid gap-5 xl:grid-cols-5">
       <Panel title="Subscriptions" description="Recurring monthly or yearly billing. The client subscribes from their portal." flush className="xl:col-span-3">
         {subs.length ? (
-          <SubscriptionTable rows={subs} showClient={false} canCancel={isManagerOrAdmin(actor)} />
+          <SubscriptionTable rows={subs} showClient={false} canCancel={isManagerOrAdmin(actor)} firmId={firmId} />
         ) : (
           <EmptyState icon={<Repeat />} title="No subscriptions">
             Set up a plan (for example, monthly bookkeeping). The client gets a Subscribe button in their portal and is then charged automatically.
@@ -551,12 +559,12 @@ async function BillingTab({
       </Panel>
       {canCreate ? (
         <Panel title="New subscription" className="xl:col-span-2">
-          {provider.isConfigured ? <NewSubscriptionForm clientId={clientId} clientEmail={clientEmail} /> : <p className="text-[13px] text-muted">Connect PayPal to set up subscriptions.</p>}
+          {provider.isConfigured ? <NewSubscriptionForm clientId={clientId} clientEmail={clientEmail} firmId={firmId} /> : <p className="text-[13px] text-muted">Connect PayPal to set up subscriptions.</p>}
         </Panel>
       ) : null}
       <Panel title="Invoices" description="Stored in PayPal; payment status refreshes automatically." flush className="xl:col-span-3">
         {rows.length ? (
-          <InvoiceTable rows={rows} showClient={false} canCancel={isManagerOrAdmin(actor)} today={today} />
+          <InvoiceTable rows={rows} showClient={false} canCancel={isManagerOrAdmin(actor)} today={today} firmId={firmId} />
         ) : (
           <EmptyState icon={<Receipt />} title="No invoices yet">
             Invoices you create here are emailed by PayPal. The client can pay by card or PayPal, and also sees them in the portal.
@@ -566,7 +574,7 @@ async function BillingTab({
       {canCreate ? (
         <Panel title="New invoice" className="xl:col-span-2">
           {provider.isConfigured ? (
-            <NewInvoiceForm clientId={clientId} clientEmail={clientEmail} engagements={engagements.map((e) => ({ value: e.id, label: e.taxYear ? `${e.title} (${e.taxYear})` : e.title }))} />
+            <NewInvoiceForm clientId={clientId} clientEmail={clientEmail} engagements={engagements.map((e) => ({ value: e.id, label: e.taxYear ? `${e.title} (${e.taxYear})` : e.title }))} firmId={firmId} />
           ) : (
             <EmptyState
               icon={<CreditCard />}

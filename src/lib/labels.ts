@@ -84,6 +84,7 @@ export const ONBOARDING_STATUS_LABELS: Record<"not_started" | "information_reque
 };
 
 export const ROLE_LABELS: Record<UserRole, string> = {
+  super_admin: "Super Admin",
   admin: "Admin",
   manager: "Manager",
   employee: "Employee",

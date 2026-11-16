@@ -37,7 +37,7 @@ export interface ActivityRow {
 
 /** Firm-wide audit trail, newest first. Admin only. Metadata is not returned. */
 export async function listRecentActivity(db: Db, actor: Actor, opts: { limit?: number } = {}): Promise<ActivityRow[]> {
-  if (actor.role !== "admin") throw new ForbiddenError();
+  if (actor.role !== "admin" && actor.role !== "super_admin") throw new ForbiddenError();
   const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
   return db
     .select({
@@ -57,7 +57,7 @@ export async function listRecentActivity(db: Db, actor: Actor, opts: { limit?: n
 
 /** Audit history for one record. Admin only. */
 export async function listAuditEvents(db: Db, actor: Actor, entityType: string, entityId: string) {
-  if (actor.role !== "admin") throw new ForbiddenError();
+  if (actor.role !== "admin" && actor.role !== "super_admin") throw new ForbiddenError();
   return db
     .select()
     .from(auditEvents)

@@ -2,11 +2,11 @@
 
 import { headers } from "next/headers";
 import { after } from "next/server";
-import { notifyNewInquiry } from "@/services/notifications";
+import { notifyPlatformInquiry } from "@/services/notifications";
 import { getDb } from "@/db";
 import { errorState, formValues, type ActionState } from "@/lib/action-state";
-import { getDefaultFirm, getFirmBySlug } from "@/services/firms";
-import { SpamRejectedError, submitWebsiteInquiry } from "@/services/leads";
+import { SpamRejectedError } from "@/services/leads";
+import { createPlatformInquiry } from "@/services/settings";
 
 /**
  * Best-effort per-IP limit (in memory, per server instance): 5 inquiries / 10 min.
@@ -33,19 +33,19 @@ export async function submitInquiryAction(_prev: ActionState, formData: FormData
     const h = await headers();
     const ip = (h.get("x-forwarded-for") ?? "").split(",")[0]!.trim() || h.get("x-real-ip") || "unknown";
     if (!allow(ip)) throw new SpamRejectedError();
+    if (formData.get("website")) throw new SpamRejectedError();
+    const startedAt = Number(formData.get("startedAt"));
+    if (!Number.isFinite(startedAt) || Date.now() - startedAt < 2_000 || Date.now() - startedAt > 24 * 60 * 60_000) {
+      throw new SpamRejectedError();
+    }
+    if (formData.get("consent") !== "on") {
+      return { status: "error", fieldErrors: { consent: ["Please check the box to agree to be contacted before sending your message."] }, values: formValues(formData) };
+    }
     const db = getDb();
-    // Each firm's public page sends its own slug; an unknown slug is treated like spam (generic error).
-    const slug = formData.get("firm");
-    const firm = typeof slug === "string" && /^[a-z0-9-]{1,60}$/.test(slug) ? await getFirmBySlug(db, slug).catch(() => null) : null;
-    if (!firm) throw new SpamRejectedError();
-    const lead = await submitWebsiteInquiry(db, firm.id, formValues(formData));
-    // Send the staff alert after the response, so the visitor never waits on (or sees) email problems.
-    // INQUIRY_NOTIFY_EMAIL is the operator's own inbox, so it is alerted only for the default firm's
-    // inquiries. Other firms see theirs in their CRM (per-firm email alerts need a verified sending domain).
-    const defaultFirm = await getDefaultFirm(db);
-    if (defaultFirm?.id === firm.id) after(() => notifyNewInquiry(lead));
+    const inquiry = await createPlatformInquiry(db, formValues(formData));
+    after(() => notifyPlatformInquiry(inquiry.id));
   } catch (error) {
     return errorState(error, formData);
   }
-  return { status: "success", message: "Thank you. We’ve received your message and will contact you within one business day." };
+  return { status: "success", message: "Thank you. Your message has been received by the CRM platform team." };
 }

@@ -9,12 +9,12 @@ export const product = {
   name: process.env.NEXT_PUBLIC_PRODUCT_NAME || "Personal CRM",
   tagline: "The personal CRM for tax and accounting firms.",
   description:
-    "Clients, engagements, deadlines, documents, secure messaging, a client portal and billing — in one place, built for U.S. tax and accounting firms.",
+    "Clients, engagements, deadlines, documents, secure messaging, a client portal and billing in one place, built for U.S. tax and accounting firms.",
   trialDays: 14,
   currency: "USD",
   plans: {
     month: { label: "Monthly", amountCents: 9900, per: "month", note: "Billed every month. Cancel anytime." },
-    year: { label: "Yearly", amountCents: 99000, per: "year", note: "Billed once a year — 2 months free." },
+    year: { label: "Yearly", amountCents: 99000, per: "year", note: "Billed once a year - 2 months free." },
   },
   /** Every plan includes everything; the price is per firm. */
   included: [
@@ -31,7 +31,7 @@ export const product = {
     { title: "Deadlines you won’t miss", body: "Tax-return and bookkeeping work with due dates, tasks and a firm-wide calendar." },
     { title: "A portal clients actually use", body: "Clients follow progress, see what you need, upload W-2s and 1099s securely and message you — no more email attachments." },
     { title: "Get paid faster", body: "Send invoices and set up monthly or yearly client subscriptions, paid by card or PayPal." },
-    { title: "Leads from your website", body: "Your firm gets its own public page with an inquiry form that feeds straight into the CRM." },
+    { title: "Lead management", body: "Capture inquiries, track follow-ups and convert prospects inside your private workspace." },
     { title: "Security first", body: "Role-based access, private workspaces per firm, audit logs, and no card data stored in the app." },
   ],
 } as const;

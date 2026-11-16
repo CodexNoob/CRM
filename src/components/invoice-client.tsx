@@ -17,12 +17,12 @@ function centsFrom(v: FormDataEntryValue | null): number {
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
 /** Staff form: creates the invoice in PayPal and emails it to the client. */
-export function NewInvoiceForm({ clientId, clientEmail, engagements }: { clientId: string; clientEmail: string | null; engagements: { value: string; label: string }[] }) {
+export function NewInvoiceForm({ clientId, clientEmail, engagements, firmId }: { clientId: string; clientEmail: string | null; engagements: { value: string; label: string }[]; firmId?: string }) {
   const [formKey, setFormKey] = useState(0);
-  return <NewInvoiceFormBody key={formKey} clientId={clientId} clientEmail={clientEmail} engagements={engagements} onReset={() => setFormKey((k) => k + 1)} />;
+  return <NewInvoiceFormBody key={formKey} clientId={clientId} clientEmail={clientEmail} engagements={engagements} firmId={firmId} onReset={() => setFormKey((k) => k + 1)} />;
 }
 
-function NewInvoiceFormBody({ clientId, clientEmail, engagements, onReset }: { clientId: string; clientEmail: string | null; engagements: { value: string; label: string }[]; onReset: () => void }) {
+function NewInvoiceFormBody({ clientId, clientEmail, engagements, firmId, onReset }: { clientId: string; clientEmail: string | null; engagements: { value: string; label: string }[]; firmId?: string; onReset: () => void }) {
   const [state, action] = useActionState(createInvoiceAction.bind(null, clientId), idleState);
   const [rows, setRows] = useState(() => Math.max(1, countRows(state)));
   const [total, setTotal] = useState(0);
@@ -56,6 +56,7 @@ function NewInvoiceFormBody({ clientId, clientEmail, engagements, onReset }: { c
 
   return (
     <form ref={formRef} action={action} onInput={recalc} className="space-y-4" noValidate>
+      {firmId ? <input type="hidden" name="firmId" value={firmId} /> : null}
       <FormMessage state={state} />
       {state.fieldErrors?._form ? <Alert tone="error">{state.fieldErrors._form.join(" ")}</Alert> : null}
       <div className="grid gap-3 sm:grid-cols-2">
@@ -149,7 +150,7 @@ function LineItem({ index, state }: { index: number; state: ActionState }) {
 }
 
 /** Send / Refresh / Cancel buttons for one invoice row. */
-export function InvoiceRowActions({ id, clientId, status, canCancel }: { id: string; clientId: string; status: string; canCancel: boolean }) {
+export function InvoiceRowActions({ id, clientId, status, canCancel, firmId }: { id: string; clientId: string; status: string; canCancel: boolean; firmId?: string }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [result, setResult] = useState<ActionState | null>(null);
@@ -157,7 +158,7 @@ export function InvoiceRowActions({ id, clientId, status, canCancel }: { id: str
   const run = (op: "send" | "refresh" | "cancel") => {
     if (op === "cancel" && !window.confirm("Cancel this invoice? PayPal will tell the client it was cancelled, and it can no longer be paid.")) return;
     start(async () => {
-      const r = await invoiceRowAction(id, clientId, op);
+      const r = await invoiceRowAction(id, clientId, op, firmId);
       setResult(r);
       router.refresh();
     });
@@ -195,12 +196,12 @@ export function InvoiceRowActions({ id, clientId, status, canCancel }: { id: str
 /* ───────── Subscriptions ───────── */
 
 /** Staff form: sets up a monthly or yearly plan the client can subscribe to from the portal. */
-export function NewSubscriptionForm({ clientId, clientEmail }: { clientId: string; clientEmail: string | null }) {
+export function NewSubscriptionForm({ clientId, clientEmail, firmId }: { clientId: string; clientEmail: string | null; firmId?: string }) {
   const [formKey, setFormKey] = useState(0);
-  return <NewSubscriptionFormBody key={formKey} clientId={clientId} clientEmail={clientEmail} onReset={() => setFormKey((k) => k + 1)} />;
+  return <NewSubscriptionFormBody key={formKey} clientId={clientId} clientEmail={clientEmail} firmId={firmId} onReset={() => setFormKey((k) => k + 1)} />;
 }
 
-function NewSubscriptionFormBody({ clientId, clientEmail, onReset }: { clientId: string; clientEmail: string | null; onReset: () => void }) {
+function NewSubscriptionFormBody({ clientId, clientEmail, firmId, onReset }: { clientId: string; clientEmail: string | null; firmId?: string; onReset: () => void }) {
   const [state, action] = useActionState(createSubscriptionAction.bind(null, clientId), idleState);
   if (state.status === "success") {
     return (
@@ -215,6 +216,7 @@ function NewSubscriptionFormBody({ clientId, clientEmail, onReset }: { clientId:
   if (!clientEmail) return <Alert tone="warning">Add an email address to this client first.</Alert>;
   return (
     <form action={action} className="space-y-3" noValidate>
+      {firmId ? <input type="hidden" name="firmId" value={firmId} /> : null}
       <FormMessage state={state} />
       {state.fieldErrors?._form ? <Alert tone="error">{state.fieldErrors._form.join(" ")}</Alert> : null}
       <TextField name="name" label="Plan name" required state={state} placeholder="Monthly bookkeeping" />
@@ -238,7 +240,7 @@ function NewSubscriptionFormBody({ clientId, clientEmail, onReset }: { clientId:
   );
 }
 
-export function SubscriptionRowActions({ id, clientId, status, canCancel }: { id: string; clientId: string; status: string; canCancel: boolean }) {
+export function SubscriptionRowActions({ id, clientId, status, canCancel, firmId }: { id: string; clientId: string; status: string; canCancel: boolean; firmId?: string }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [result, setResult] = useState<ActionState | null>(null);
@@ -247,7 +249,7 @@ export function SubscriptionRowActions({ id, clientId, status, canCancel }: { id
   const run = (op: "refresh" | "cancel") => {
     if (op === "cancel" && !window.confirm("Cancel this subscription? No further payments will be taken.")) return;
     start(async () => {
-      setResult(await subscriptionRowAction(id, clientId, op));
+      setResult(await subscriptionRowAction(id, clientId, op, firmId));
       router.refresh();
     });
   };

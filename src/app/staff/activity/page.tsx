@@ -4,6 +4,8 @@ import { getDb } from "@/db";
 import { PageHeader } from "@/components/ui";
 import { requireStaffActor } from "@/lib/auth/current";
 import { listRecentActivity } from "@/services/audit";
+import { listPlatformFirms, resolveFirmContext } from "@/services/firms";
+import { FirmScopePicker } from "@/components/staff/firm-scope-picker";
 import { ActivityTable } from "./activity-table";
 
 export const metadata: Metadata = { title: "Activity Logs" };
@@ -64,13 +66,18 @@ function entityHref(type: string, id: string | null) {
   return null;
 }
 
-export default async function ActivityPage() {
+export default async function ActivityPage({ searchParams }: { searchParams: Promise<{ firmId?: string }> }) {
   const actor = await requireStaffActor();
-  if (actor.role !== "admin") notFound();
-  const rows = await listRecentActivity(getDb(), actor, { limit: 500 });
+  if (actor.role !== "admin" && actor.role !== "super_admin") notFound();
+  const db = getDb();
+  const params = await searchParams;
+  const scope = await resolveFirmContext(db, actor, params.firmId);
+  const firms = actor.role === "super_admin" ? await listPlatformFirms(db, actor) : [];
+  const rows = await listRecentActivity(db, scope, { limit: 500 });
   return (
     <>
       <PageHeader title="Activity Logs" description="The audit trail: the latest 500 events. Entries cannot be edited or deleted from the application." />
+      {actor.role === "super_admin" ? <FirmScopePicker action="/staff/activity" currentFirmId={scope.firmId} firms={firms} /> : null}
       <ActivityTable
         rows={rows.map((r) => ({
           id: r.id,

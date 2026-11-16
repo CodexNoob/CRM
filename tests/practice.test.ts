@@ -2,20 +2,30 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DbHandle } from "@/db";
 import type { Actor } from "@/lib/auth/actor";
 import { ForbiddenError, ValidationError } from "@/lib/errors";
-import { site } from "@/content/site";
 import { createClient } from "@/services/clients";
 import { createEngagement } from "@/services/engagements";
-import { createLead, convertLead } from "@/services/leads";
+import { createLead, convertLead, listLeads } from "@/services/leads";
 import { getPracticeReport, listPortalAccounts, listTaxYears, listWork, TAX_SERVICES, BOOKKEEPING_SERVICES } from "@/services/practice";
-import { createAnnouncement, getWebsiteContent, saveFirmProfile, setAnnouncementPublished } from "@/services/settings";
+import {
+  createAnnouncement,
+  createPlatformInquiry,
+  getOrganizationProfile,
+  getPlatformProfile,
+  getPortalAnnouncements,
+  listPlatformInquiries,
+  saveFirmProfile,
+  savePlatformProfile,
+  setAnnouncementPublished,
+} from "@/services/settings";
 import { createClientWithPortalUser, createTestDb, createUser } from "./helpers";
 
 let h: DbHandle;
-let admin: Actor, prepA: Actor, portal: Actor;
+let admin: Actor, prepA: Actor, portal: Actor, superAdmin: Actor;
 
 beforeAll(async () => {
   h = await createTestDb();
   admin = await createUser(h.db, { role: "admin" });
+  superAdmin = await createUser(h.db, { role: "super_admin" });
   prepA = await createUser(h.db, { role: "employee" });
   const a = await createClientWithPortalUser(h.db, admin, "Alpha");
   portal = a.portalUser;
@@ -57,38 +67,66 @@ describe("tax & accounting views", () => {
   });
 });
 
-describe("settings drive the website", () => {
+describe("platform and organization settings are separate", () => {
   it("uses defaults until an admin saves a profile, then the database", async () => {
-    const before = await getWebsiteContent(h.db, admin.firmId);
-    expect(before.profile).toMatchObject({ name: site.name, fromDatabase: false });
+    const before = await getOrganizationProfile(h.db, admin.firmId);
+    expect(before).toMatchObject({ name: "Test Firm", fromDatabase: false, websiteUrl: "", socialLinks: [] });
 
     await saveFirmProfile(h.db, admin, {
       name: "Rivera & Co. CPAs",
       phone: "(555) 010-2222",
       email: "office@example.test",
       addressLine1: "1 Main St",
+      websiteUrl: "https://rivera.example.test",
+      socialLinks: "LinkedIn | https://linkedin.example.test/rivera",
+      timeZone: "America/Chicago",
+      locale: "en-US",
+      currency: "USD",
       hours: "Mon – Fri | 9–5\nSat | By appointment",
     });
-    const after = await getWebsiteContent(h.db, admin.firmId);
-    expect(after.profile).toMatchObject({ name: "Rivera & Co. CPAs", phone: "(555) 010-2222", addressLines: ["1 Main St"], fromDatabase: true });
-    expect(after.profile.hours).toEqual([["Mon – Fri", "9–5"], ["Sat", "By appointment"]]);
+    const after = await getOrganizationProfile(h.db, admin.firmId);
+    expect(after).toMatchObject({
+      name: "Rivera & Co. CPAs",
+      phone: "(555) 010-2222",
+      addressLines: ["1 Main St"],
+      websiteUrl: "https://rivera.example.test",
+      timeZone: "America/Chicago",
+      fromDatabase: true,
+    });
+    expect(after.hours).toEqual([["Mon – Fri", "9–5"], ["Sat", "By appointment"]]);
+    expect(after.socialLinks).toEqual([{ label: "LinkedIn", url: "https://linkedin.example.test/rivera" }]);
 
     // Saving again updates the single profile row.
     await saveFirmProfile(h.db, admin, { name: "Rivera CPAs" });
-    expect((await getWebsiteContent(h.db, admin.firmId)).profile.name).toBe("Rivera CPAs");
+    expect((await getOrganizationProfile(h.db, admin.firmId)).name).toBe("Rivera CPAs");
+    expect((await getPlatformProfile(h.db)).name).not.toBe("Rivera CPAs");
   });
 
-  it("replaces default announcements once the firm manages its own", async () => {
-    expect((await getWebsiteContent(h.db, admin.firmId)).announcements[0]!.id).toMatch(/^default-/);
+  it("shows firm announcements only to authenticated clients in that firm", async () => {
+    expect(await getPortalAnnouncements(h.db, portal)).toEqual([]);
     const a = await createAnnouncement(h.db, admin, { title: "Office closed Friday", body: "We reopen Monday.", publishedOn: "2026-11-20" });
-    expect((await getWebsiteContent(h.db, admin.firmId)).announcements.map((x) => x.title)).toEqual(["Office closed Friday"]);
+    expect((await getPortalAnnouncements(h.db, portal)).map((x) => x.title)).toEqual(["Office closed Friday"]);
     await setAnnouncementPublished(h.db, admin, a.id, false);
-    expect((await getWebsiteContent(h.db, admin.firmId)).announcements).toEqual([]);
+    expect(await getPortalAnnouncements(h.db, portal)).toEqual([]);
+    await expect(getPortalAnnouncements(h.db, admin)).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it("is admin-only and validated", async () => {
+  it("keeps platform settings and inquiries Super-Admin-only", async () => {
     await expect(saveFirmProfile(h.db, prepA, { name: "x" })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(createAnnouncement(h.db, portal, { title: "x", body: "y", publishedOn: "2026-01-01" })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(saveFirmProfile(h.db, admin, { name: "", email: "nope" })).rejects.toBeInstanceOf(ValidationError);
+    await expect(savePlatformProfile(h.db, admin, { name: "Tenant Admin" })).rejects.toBeInstanceOf(ForbiddenError);
+
+    await savePlatformProfile(h.db, superAdmin, { name: "TaxDesk Platform", officialEmail: "support@taxdesk.example.test" });
+    const inquiry = await createPlatformInquiry(h.db, {
+      name: "Platform Contact Only",
+      email: "platform-contact@example.test",
+      topic: "sales",
+      message: "Please send pricing.",
+    });
+    expect((await getPlatformProfile(h.db)).name).toBe("TaxDesk Platform");
+    expect((await listPlatformInquiries(h.db, superAdmin)).map((row) => row.id)).toContain(inquiry.id);
+    expect(JSON.stringify(await listLeads(h.db, admin))).not.toContain("platform-contact@example.test");
+    await expect(listPlatformInquiries(h.db, admin)).rejects.toBeInstanceOf(ForbiddenError);
   });
 });

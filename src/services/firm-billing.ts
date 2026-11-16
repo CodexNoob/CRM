@@ -8,6 +8,7 @@ import { ForbiddenError, IntegrationNotConfiguredError, ValidationError } from "
 import { recordAudit } from "./audit";
 import { getFirm } from "./firms";
 import { paypalFailure } from "./invoices";
+import { getPlatformProfile } from "./settings";
 import { paypalSubscriptions, type SubscriptionProvider } from "./subscriptions";
 
 /**
@@ -82,7 +83,8 @@ async function planFor(db: Db, interval: PlanInterval, p: SubscriptionProvider):
   const plan = product.plans[interval];
   const [existing] = await db.select().from(platformPlans).where(eq(platformPlans.interval, interval));
   if (existing && existing.amountCents === plan.amountCents && existing.currency === product.currency) return existing.paypalPlanId;
-  const { planId } = await p.createPlan({ name: `${product.name} — ${plan.label}`, amountCents: plan.amountCents, currency: product.currency, interval });
+  const platform = await getPlatformProfile(db);
+  const { planId } = await p.createPlan({ name: `${platform.name} — ${plan.label}`, amountCents: plan.amountCents, currency: product.currency, interval });
   await db
     .insert(platformPlans)
     .values({ interval, amountCents: plan.amountCents, currency: product.currency, paypalPlanId: planId })
@@ -109,7 +111,8 @@ export async function startFirmCheckout(
   let subscriptionId: string;
   try {
     const planId = await planFor(db, interval, p);
-    const snap = await p.startSubscription({ planId, subscriberName: actor.name, subscriberEmail: actor.email, brandName: product.name, ...urls });
+    const platform = await getPlatformProfile(db);
+    const snap = await p.startSubscription({ planId, subscriberName: actor.name, subscriberEmail: actor.email, brandName: platform.name, ...urls });
     if (!snap.approveUrl) throw new ValidationError({ _form: ["PayPal didn’t return a checkout link. Please try again."] });
     approveUrl = snap.approveUrl;
     subscriptionId = snap.id;

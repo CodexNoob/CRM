@@ -64,7 +64,7 @@ export function PortalClientSwitcher({ clients, current }: { clients: { clientId
         name="clientId"
         defaultValue={current}
         onChange={() => formRef.current?.requestSubmit()}
-        className="h-9 max-w-[14rem] truncate rounded-md border border-line bg-surface px-2 text-sm text-ink"
+        className="h-9 max-w-56 truncate rounded-md border border-line bg-surface px-2 text-sm text-ink"
       >
         {clients.map((c) => (
           <option key={c.clientId} value={c.clientId}>

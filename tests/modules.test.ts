@@ -56,10 +56,13 @@ describe("activity log", () => {
 
 describe("navigation", () => {
   it("hides administration items from non-admins and resolves planned modules", () => {
-    const slugs = (admin: boolean) => navForRole(admin).flatMap((s) => s.items.map((i) => i.slug));
-    expect(slugs(true)).toEqual(expect.arrayContaining(["team", "activity", "settings"]));
-    expect(slugs(false)).not.toEqual(expect.arrayContaining(["team"]));
-    expect(slugs(false)).not.toContain("activity");
+    const slugs = (role: "admin" | "manager" | "employee" | "read_only" | "super_admin") =>
+      navForRole({ role }).flatMap((s) => s.items.map((i) => i.slug));
+    expect(slugs("admin")).toEqual(expect.arrayContaining(["team", "activity", "settings"]));
+    expect(slugs("manager")).not.toContain("team");
+    expect(slugs("read_only")).not.toContain("invoices");
+    expect(slugs("admin")).not.toContain("platform-settings");
+    expect(slugs("super_admin")).toEqual(expect.arrayContaining(["team", "activity", "settings", "platform-settings"]));
     expect(findPlanned("e-signatures")?.label).toBe("E-Signatures");
     expect(findPlanned("e-signatures")?.needs).toMatch(/provider/);
     for (const built of ["tax-returns", "tax-preparation", "bookkeeping", "client-portal", "reports", "integrations", "settings"]) {

@@ -389,7 +389,7 @@ export const taxAuthorityResponseSchema = z.object({
   response: optionalText(2000),
 });
 
-export const staffRoleSchema =z.enum(["admin", "manager", "employee"], { error: "Choose a role." });
+export const staffRoleSchema = z.enum(["super_admin", "admin", "manager", "employee", "read_only"], { error: "Choose a role." });
 
 export const staffInviteSchema = z.object({
   name: requiredText("Name", 200),

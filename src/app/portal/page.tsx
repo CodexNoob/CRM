@@ -8,6 +8,7 @@ import { formatDateTime, formatTime } from "@/lib/time";
 import { listPortalAppointments } from "@/services/calendar";
 import { firmToday } from "@/services/dashboard";
 import { getPortalOverview, getPortalSummary } from "@/services/portal";
+import { getPortalAnnouncements } from "@/services/settings";
 import { CompleteTaskButton } from "./complete-task-button";
 
 export const metadata: Metadata = { title: "Overview" };
@@ -21,10 +22,11 @@ export default async function PortalHome() {
   const today = firmToday();
   // Older services authorize by actor.clientId — give them the server-resolved client.
   const scopedActor = { ...actor, clientId: client.clientId };
-  const [summary, overview, appts] = await Promise.all([
+  const [summary, overview, appts, announcements] = await Promise.all([
     getPortalSummary(db, actor, client.clientId, today),
     getPortalOverview(db, actor, client.clientId),
     listPortalAppointments(db, scopedActor),
+    getPortalAnnouncements(db, actor),
   ]);
 
   const tiles = [
@@ -48,6 +50,20 @@ export default async function PortalHome() {
             : "Nothing needs your attention right now. We’ll let you know if we need anything."
         }
       />
+
+      {announcements.length ? (
+        <Card title="Firm announcements" className="mb-5">
+          <ul className="divide-y divide-line">
+            {announcements.map((announcement) => (
+              <li key={announcement.id} className="py-2 first:pt-0 last:pb-0">
+                <p className="font-medium text-ink">{announcement.title}</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-muted">{announcement.body}</p>
+                <p className="mt-1 text-xs text-muted">{formatDate(announcement.date)}</p>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
 
       <dl className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
         {tiles.map((t) => (

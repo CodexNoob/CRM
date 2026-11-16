@@ -4,29 +4,33 @@ import { getDb } from "@/db";
 import { SimpleTable, td } from "@/components/table";
 import { Alert, Badge, PageHeader, Panel, TabNav } from "@/components/ui";
 import { requireStaffActor } from "@/lib/auth/current";
+import { FirmScopePicker } from "@/components/staff/firm-scope-picker";
 import { MAX_FAILED_LOGINS, LOCKOUT_MS } from "@/lib/auth/login";
 import { SESSION_ABSOLUTE_MS, SESSION_IDLE_MS } from "@/lib/auth/sessions";
 import { formatDate } from "@/lib/labels";
 import { firmToday } from "@/services/dashboard";
-import { getFirm } from "@/services/firms";
-import { getPublicProfile, listAllAnnouncements } from "@/services/settings";
+import { listPlatformFirms, resolveFirmContext } from "@/services/firms";
+import { getOrganizationProfile, listAllAnnouncements } from "@/services/settings";
 import { AnnouncementToggle, FirmProfileForm, NewAnnouncementForm } from "./settings-forms";
 
 export const metadata: Metadata = { title: "Settings" };
 
-const TABS = { profile: "Firm profile", website: "Website announcements", security: "Security" } as const;
+const TABS = { profile: "Organization profile", website: "Client announcements", security: "Security" } as const;
 type Tab = keyof typeof TABS;
 
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string; firmId?: string }> }) {
   const actor = await requireStaffActor();
-  if (actor.role !== "admin") notFound();
-  const requested = (await searchParams).tab;
+  if (actor.role !== "admin" && actor.role !== "super_admin") notFound();
+  const params = await searchParams;
+  const requested = params.tab;
   const tab: Tab = requested && requested in TABS ? (requested as Tab) : "profile";
   const db = getDb();
-  const [profile, list, firm] = await Promise.all([getPublicProfile(db, actor.firmId), listAllAnnouncements(db, actor), getFirm(db, actor.firmId)]);
+  const scope = await resolveFirmContext(db, actor, params.firmId);
+  const firms = actor.role === "super_admin" ? await listPlatformFirms(db, actor) : [];
+  const [profile, list] = await Promise.all([getOrganizationProfile(db, scope.firmId), listAllAnnouncements(db, scope)]);
 
   const security: [string, string, boolean][] = [
-    ["Role-based access", "Admin, partner, preparer and client roles, enforced on the server for every record", true],
+    ["Role-based access", "Super Admin, Admin, Manager, Employee, Read Only and Client roles; permissions are enforced on the server", true],
     ["Session management", `Sessions expire after ${SESSION_IDLE_MS / 3_600_000} h idle and ${SESSION_ABSOLUTE_MS / 3_600_000} h maximum`, true],
     ["Account lockout", `${MAX_FAILED_LOGINS} failed sign-ins lock an account for ${LOCKOUT_MS / 60_000} minutes`, true],
     ["Password storage", "Minimum 12 characters, stored as argon2id hashes", true],
@@ -39,40 +43,44 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="Settings" description="Firm profile, public website content and security posture." />
-      <Alert tone="info">
-        Your firm’s public page (with its inquiry form):{" "}
-        <a href={`/f/${firm.slug}`} target="_blank" rel="noopener noreferrer" className="font-medium underline underline-offset-2">
-          {`${(process.env.APP_URL ?? "").replace(/\/$/, "")}/f/${firm.slug}`}
-        </a>
-      </Alert>
+      <PageHeader title="Organization settings" description="Manage private firm identity, client-portal announcements and security posture." />
+      {actor.role === "super_admin" ? <FirmScopePicker action="/staff/settings" currentFirmId={scope.firmId} firms={firms} /> : null}
       <div className="mt-5 mb-5">
-        <TabNav label="Settings sections" items={(Object.keys(TABS) as Tab[]).map((t) => ({ href: t === "profile" ? "/staff/settings" : `/staff/settings?tab=${t}`, label: TABS[t], active: tab === t }))} />
+        <TabNav label="Settings sections" items={(Object.keys(TABS) as Tab[]).map((t) => {
+          const query = new URLSearchParams();
+          if (t !== "profile") query.set("tab", t);
+          if (actor.role === "super_admin") query.set("firmId", scope.firmId);
+          const href = query.size ? `/staff/settings?${query.toString()}` : "/staff/settings";
+          return { href, label: TABS[t], active: tab === t };
+        })} />
       </div>
 
       {tab === "profile" ? (
         <div className="grid gap-5 xl:grid-cols-[1fr_20rem]">
-          <Panel title="Firm profile" description="Shown on the public website and in the workspace">
+          <Panel title="Organization profile" description="These details are private to the firm and used in its authenticated workspace.">
             {!profile.fromDatabase ? (
               <div className="mb-4">
-                <Alert tone="info">The website is showing default placeholder details. Save this form to replace them.</Alert>
+                <Alert tone="info">This organization is using its registered firm name and default regional settings. Save the profile to customize it.</Alert>
               </div>
             ) : null}
-            <FirmProfileForm profile={profile} />
+            <FirmProfileForm profile={profile} firmId={scope.firmId} />
           </Panel>
           <Panel title="Where this appears">
             <ul className="space-y-2 text-[13px] text-muted">
-              <li>Website header, contact section and footer</li>
-              <li>Search engine listing (name, phone, address)</li>
-              <li>Workspace switcher in the sidebar</li>
+              <li>Organization identity in the staff workspace and client portal</li>
+              <li>Announcements shown only to authenticated clients in this firm</li>
+              <li>Organization name used for client subscription checkout branding</li>
             </ul>
+            <p className="mt-4 border-t border-line pt-3 text-xs leading-5 text-muted">
+              PayPal invoices currently use the platform’s connected PayPal account. This profile does not change merchant identity or payment settlement; per-firm PayPal accounts are not implemented.
+            </p>
           </Panel>
         </div>
       ) : null}
 
       {tab === "website" ? (
         <div className="grid gap-5 xl:grid-cols-[1fr_22rem]">
-          <Panel title="Announcements" description="Published items appear on the website’s home page" flush>
+          <Panel title="Client announcements" description="Published items are visible to authenticated clients in this firm’s portal only." flush>
             {list.length ? (
               <SimpleTable label="Announcements" headers={[{ label: "Announcement" }, { label: "Date" }, { label: "Status" }, { label: "", align: "right" }]}>
                 {list.map((a) => (
@@ -83,7 +91,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                     </td>
                     <td className={`${td} tabular whitespace-nowrap text-muted`}>{formatDate(a.publishedOn)}</td>
                     <td className={td}><Badge tone={a.isPublished ? "good" : "neutral"} dot>{a.isPublished ? "Published" : "Hidden"}</Badge></td>
-                    <td className={`${td} text-right`}><AnnouncementToggle id={a.id} published={a.isPublished} /></td>
+                    <td className={`${td} text-right`}><AnnouncementToggle id={a.id} published={a.isPublished} firmId={scope.firmId} /></td>
                   </tr>
                 ))}
               </SimpleTable>
@@ -92,7 +100,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             )}
           </Panel>
           <Panel title="New announcement">
-            <NewAnnouncementForm today={firmToday()} />
+            <NewAnnouncementForm today={firmToday()} firmId={scope.firmId} />
           </Panel>
         </div>
       ) : null}

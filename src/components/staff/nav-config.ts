@@ -1,4 +1,6 @@
 import type { NavIconName } from "./icons";
+import type { Actor } from "@/lib/auth/actor";
+import { can, type Module } from "@/lib/auth/permissions";
 
 /**
  * The staff sidebar. `live` items open working pages. `planned` items open an
@@ -13,6 +15,8 @@ export interface NavEntry {
   icon: NavIconName;
   status: "live" | "planned";
   adminOnly?: boolean;
+  superAdminOnly?: boolean;
+  module?: Module;
   /** What the module does (shown on its planned page). */
   summary: string;
   /** Badge key filled with a real count by the layout. */
@@ -68,25 +72,33 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "Financial Management",
     items: [
-      live("invoices", "/staff/invoices", "Invoices & Billing", "invoices", "Create invoices, send them through PayPal and track payment"),
-      planned("payments", "Payments", "payments", "Payment status and transaction history", { needs: "Invoice payments are already tracked on Invoices & Billing (via PayPal). This page will add a full transaction history (payouts, fees and refunds) from PayPal’s reporting API. Card details will never be stored in this app." }),
-      live("reports", "/staff/reports", "Financial Reports", "reports", "Revenue, outstanding balances"),
-      live("integrations", "/staff/integrations", "Integrations", "integrations", "QuickBooks Online and other integrations"),
+      live("invoices", "/staff/invoices", "Invoices & Billing", "invoices", "Create invoices, send them through PayPal and track payment", { module: "billing" }),
+      planned("payments", "Payments", "payments", "Payment status and transaction history", { module: "billing", needs: "Invoice payments are already tracked on Invoices & Billing (via PayPal). This page will add a full transaction history (payouts, fees and refunds) from PayPal’s reporting API. Card details will never be stored in this app." }),
+      live("reports", "/staff/reports", "Financial Reports", "reports", "Revenue, outstanding balances", { module: "reports" }),
+      live("integrations", "/staff/integrations", "Integrations", "integrations", "QuickBooks Online and other integrations", { module: "integrations" }),
     ],
   },
   {
     title: "Administration",
     items: [
-      live("team", "/staff/team", "Team Members", "team", "Staff accounts and assignments", { adminOnly: true }),
-      planned("automation", "Automation Rules", "automation", "Automated reminders and workflows", { adminOnly: true, needs: "A background job runner and an email service, so reminders can be sent on schedule even when no one is signed in." }),
-      live("activity", "/staff/activity", "Activity Logs", "activity", "Audit trail and user activities", { adminOnly: true }),
-      live("settings", "/staff/settings", "Settings", "settings", "Firm profile, permissions, security", { adminOnly: true }),
+      live("team", "/staff/team", "Team Members", "team", "Staff accounts and assignments", { adminOnly: true, module: "team" }),
+      planned("automation", "Automation Rules", "automation", "Automated reminders and workflows", { adminOnly: true, module: "team", needs: "A background job runner and an email service, so reminders can be sent on schedule even when no one is signed in." }),
+      live("activity", "/staff/activity", "Activity Logs", "activity", "Audit trail and user activities", { adminOnly: true, module: "team" }),
+      live("settings", "/staff/settings", "Organization Settings", "settings", "Private firm profile, client announcements and security", { adminOnly: true, module: "settings" }),
+      live("platform-settings", "/staff/platform-settings", "Platform Settings", "settings", "Platform identity and platform-only inquiries", { superAdminOnly: true }),
     ],
   },
 ];
 
-export function navForRole(isAdmin: boolean): NavSection[] {
-  return NAV_SECTIONS.map((s) => ({ ...s, items: s.items.filter((i) => isAdmin || !i.adminOnly) })).filter((s) => s.items.length > 0);
+export function navForRole(actor: Pick<Actor, "role">): NavSection[] {
+  return NAV_SECTIONS.map((s) => ({
+    ...s,
+    items: s.items.filter((i) =>
+      (!i.adminOnly || actor.role === "admin" || actor.role === "super_admin")
+      && (!i.superAdminOnly || actor.role === "super_admin")
+      && (!i.module || can(actor, i.module, "view")),
+    ),
+  })).filter((s) => s.items.length > 0);
 }
 
 export function findPlanned(slug: string): NavEntry | undefined {

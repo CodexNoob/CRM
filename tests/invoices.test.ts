@@ -9,6 +9,7 @@ import { AppError, ForbiddenError, IntegrationNotConfiguredError, NotFoundError,
 import { formatMoney } from "@/lib/labels";
 import { parseInvoiceInput } from "@/lib/validation";
 import { createEngagement } from "@/services/engagements";
+import { resolveFirmContext } from "@/services/firms";
 import {
   cancelInvoice,
   countOpenPortalInvoices,
@@ -22,7 +23,7 @@ import {
   sendInvoice,
   type InvoiceProvider,
 } from "@/services/invoices";
-import { createClientWithPortalUser, createTestDb, createUser } from "./helpers";
+import { createClientWithPortalUser, createTestDb, createTestFirm, createUser } from "./helpers";
 
 /** In-memory stand-in for PayPal. Ids are unique across tests, like real PayPal ids. */
 let n = 0;
@@ -82,7 +83,7 @@ const form = (over: Record<string, string> = {}) => ({
 });
 
 let h: DbHandle;
-let admin: Actor, prepA: Actor, prepB: Actor, portalA: Actor, portalB: Actor;
+let admin: Actor, prepA: Actor, prepB: Actor, readOnly: Actor, portalA: Actor, portalB: Actor;
 let clientA: string, clientB: string, noEmailClient: string;
 let pp: ReturnType<typeof fakePayPal>;
 
@@ -91,6 +92,7 @@ beforeAll(async () => {
   admin = await createUser(h.db, { role: "admin", name: "Ada Admin" });
   prepA = await createUser(h.db, { role: "employee", name: "Pat A" });
   prepB = await createUser(h.db, { role: "employee", name: "Pat B" });
+  readOnly = await createUser(h.db, { role: "read_only", name: "Read Only" });
   const a = await createClientWithPortalUser(h.db, admin, "Jordan Sample");
   const b = await createClientWithPortalUser(h.db, admin, "Client B");
   const c = await createClientWithPortalUser(h.db, admin, "No Email");
@@ -239,6 +241,22 @@ describe("status sync, cancel and lists", () => {
     expect(adminRows.some((r) => r.id === bInv.id)).toBe(true);
     await expect(refreshInvoice(h.db, prepA, bInv.id, pp.provider)).rejects.toBeInstanceOf(NotFoundError);
     await expect(refreshInvoice(h.db, admin, "not-a-uuid", pp.provider)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(listInvoices(h.db, readOnly, {}, pp.provider)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("Super Admin invoice access is scoped to the selected firm", async () => {
+    const firmId = await createTestFirm(h.db, "Invoice Scope Firm");
+    const firmAdmin = await createUser(h.db, { role: "admin", firmId, name: "Firm Billing Admin" });
+    const client = await createClientWithPortalUser(h.db, firmAdmin, "Scoped Billing Client");
+    await h.db.update(clients).set({ email: "billing@example.test" }).where(eq(clients.id, client.client.id));
+    const invoice = await createInvoice(h.db, firmAdmin, client.client.id, form(), pp.provider);
+    const platformAdmin = await createUser(h.db, { role: "super_admin", name: "Platform Billing Admin" });
+    const scope = await resolveFirmContext(h.db, platformAdmin, firmId);
+
+    expect((await listInvoices(h.db, scope, {}, pp.provider)).map((row) => row.id)).toEqual([invoice.id]);
+    await cancelInvoice(h.db, scope, invoice.id, pp.provider);
+    expect(pp.state.calls).toContain(`cancel:${invoice.paypalInvoiceId}`);
+    expect((await listInvoices(h.db, admin, {}, pp.provider)).some((row) => row.id === invoice.id)).toBe(false);
   });
 
   it("totals count only open balances and recent payments", async () => {

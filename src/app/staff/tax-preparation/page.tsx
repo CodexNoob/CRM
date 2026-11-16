@@ -33,7 +33,18 @@ export default async function TaxPreparationPage() {
 
   return (
     <>
-      <PageHeader title="Tax Preparation" description="Production cases, document requirements, assignments, and review readiness." />
+      <PageHeader
+        title="Tax Preparation"
+        description="Production cases, document requirements, assignments, and review readiness."
+        actions={
+          <CreateTaxPreparationForm
+            clients={clients.map((c) => ({ id: c.id, name: c.displayName }))}
+            engagements={engagements.map((e) => ({ id: e.id, clientId: e.clientId, title: e.title, clientName: e.clientName, serviceType: e.serviceType }))}
+            staff={staffOptions}
+            defaultTaxYear={new Date().getFullYear() - 1}
+          />
+        }
+      />
       <StatStrip className="mb-5" items={[
         { label: "Total cases", value: cases.length },
         { label: "Waiting for documents", value: cases.filter((c) => ["documents_requested", "awaiting_documents"].includes(c.status)).length, tone: "warning" },
@@ -47,14 +58,6 @@ export default async function TaxPreparationPage() {
           <TaxPreparationCasesTable cases={cases} today={today} />
         </Card>
         <div className="space-y-5">
-          <Card title="New preparation case">
-            <CreateTaxPreparationForm
-              clients={clients.map((c) => ({ id: c.id, name: c.displayName }))}
-              engagements={engagements.map((e) => ({ id: e.id, clientId: e.clientId, title: e.title, clientName: e.clientName, serviceType: e.serviceType }))}
-              staff={staffOptions}
-              defaultTaxYear={new Date().getFullYear() - 1}
-            />
-          </Card>
           {can(actor, "tax_preparation", "manage") ? (
             <Card title="Document requirements" description={`${templates.length} active requirements. New cases receive matching requirements.`}>
               <details>

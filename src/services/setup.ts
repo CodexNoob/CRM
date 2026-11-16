@@ -4,7 +4,6 @@ import { z } from "zod";
 import type { Db } from "@/db";
 import { users } from "@/db/schema";
 import { actorFromUser, type Actor } from "@/lib/auth/actor";
-import { site } from "@/content/site";
 import { hashPassword } from "@/lib/auth/crypto";
 import { AppError, ValidationError } from "@/lib/errors";
 import { parseInput, passwordSchema } from "@/lib/validation";
@@ -69,7 +68,7 @@ export async function createFirstAdmin(db: Db, input: unknown, expectedCode: str
     // The first admin belongs to firm #1 (created here on a brand-new database; the
     // multi-firm migration already created it if data existed). It is the operator's own
     // firm, so it starts active rather than on a trial.
-    const firm = (await getDefaultFirm(t)) ?? (await createFirm(t, { name: site.name, status: "active" }));
+    const firm = (await getDefaultFirm(t)) ?? (await createFirm(t, { name: "My Firm", status: "active" }));
     const [user] = await t
       .insert(users)
       .values({ firmId: firm.id, email: data.email, name: data.name, role: "admin", passwordHash })

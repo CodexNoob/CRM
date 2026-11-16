@@ -110,10 +110,12 @@ describe("Scenario 8 — permissions", () => {
   });
 
   it("restricts navigation per role (admin-only modules)", () => {
-    const labels = (isAdmin: boolean) => navForRole(isAdmin).flatMap((s) => s.items.map((i) => i.label));
-    expect(labels(true)).toContain("Team Members");
-    expect(labels(false)).not.toContain("Team Members");
-    expect(labels(false)).not.toContain("Activity Logs");
+    const labels = (role: "admin" | "manager" | "employee" | "read_only" | "super_admin") =>
+      navForRole({ role }).flatMap((s) => s.items.map((i) => i.label));
+    expect(labels("admin")).toContain("Team Members");
+    expect(labels("manager")).not.toContain("Team Members");
+    expect(labels("employee")).not.toContain("Activity Logs");
+    expect(labels("super_admin")).toContain("Activity Logs");
   });
 
   it("the permission matrix gives each role the right actions", () => {

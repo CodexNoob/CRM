@@ -8,7 +8,7 @@ import { ForbiddenError, IntegrationNotConfiguredError, ValidationError } from "
 import { login } from "@/lib/auth/login";
 import { cancelFirmSubscription, firmAccess, getBillingOverview, startFirmCheckout, syncFirmBilling } from "@/services/firm-billing";
 import { getFirm } from "@/services/firms";
-import { getPublicProfile, saveFirmProfile } from "@/services/settings";
+import { getOrganizationProfile, saveFirmProfile } from "@/services/settings";
 import { SignupRejectedError, signUpFirm } from "@/services/signup";
 import type { SubscriptionProvider } from "@/services/subscriptions";
 import { listClients } from "@/services/clients";
@@ -85,14 +85,14 @@ describe("access rules", () => {
 });
 
 describe("sign-up", () => {
-  it("creates a firm on a 14-day trial with its admin and public profile; the admin can sign in", async () => {
+  it("creates a firm on a 14-day trial with its organization profile; the admin can sign in", async () => {
     const data = signup();
     const actor = await signUpFirm(h.db, data);
     expect(actor.role).toBe("admin");
     const firm = await getFirm(h.db, actor.firmId);
     expect(firm).toMatchObject({ name: "Rivera Tax & Accounting", slug: "rivera-tax-accounting", status: "trial" });
     expect(Math.round((firm.trialEndsAt!.getTime() - Date.now()) / DAY)).toBe(14);
-    expect((await getPublicProfile(h.db, firm.id)).name).toBe("Rivera Tax & Accounting");
+    expect((await getOrganizationProfile(h.db, firm.id)).name).toBe("Rivera Tax & Accounting");
     const session = await login(h.db, { email: data.email as string, password: PASSWORD });
     expect(session.actor.firmId).toBe(firm.id);
     expect(await listClients(h.db, actor)).toEqual([]); // a brand-new, empty workspace

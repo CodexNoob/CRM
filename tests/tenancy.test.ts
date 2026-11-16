@@ -5,6 +5,7 @@ import { auditEvents, clients } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 import { listRecentActivity } from "@/services/audit";
+import { resolveFirmContext } from "@/services/firms";
 import { cancelAppointment, createAppointment, getCalendar, listPortalAppointments } from "@/services/calendar";
 import { getClient, listClients, updateClient } from "@/services/clients";
 import { getDashboard } from "@/services/dashboard";
@@ -15,7 +16,7 @@ import { convertLead, countLeadsByStatus, createLead, getLead, listLeads, setLea
 import { countUnreadForClient, countUnreadForStaff, getThread, listConversations, sendMessage } from "@/services/messages";
 import { getPortalOverview } from "@/services/portal";
 import { listPortalAccounts, listWork } from "@/services/practice";
-import { createAnnouncement, getPublicAnnouncements, getPublicProfile, listAllAnnouncements, saveFirmProfile, setAnnouncementPublished } from "@/services/settings";
+import { createAnnouncement, getOrganizationProfile, getPortalAnnouncements, listAllAnnouncements, saveFirmProfile, setAnnouncementPublished } from "@/services/settings";
 import { changeStaffRole, listTeam, setStaffActive } from "@/services/team";
 import { listPortalUsers } from "@/services/users";
 import { globalSearch } from "@/services/workspace";
@@ -31,7 +32,8 @@ const PDF = Buffer.from("%PDF-1.7\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF");
 
 let h: DbHandle;
 let firmB: string;
-let adminA: Actor, prepA: Actor, portalA: Actor, adminB: Actor, prepB: Actor, portalB: Actor;
+let adminA: Actor, prepA: Actor, portalA: Actor, adminB: Actor, prepB: Actor, portalB: Actor, superAdmin: Actor;
+let superAdminB: Actor;
 const A = {} as { client: string; engagement: string; task: string; document: string; lead: string; appointment: string; announcement: string };
 let clientB: string;
 const missing = () => expect.objectContaining({}) && NotFoundError;
@@ -39,10 +41,12 @@ const missing = () => expect.objectContaining({}) && NotFoundError;
 beforeAll(async () => {
   h = await createTestDb();
   adminA = await createUser(h.db, { role: "admin", name: "Ada A" });
+  superAdmin = await createUser(h.db, { role: "super_admin", name: "Platform Admin" });
   prepA = await createUser(h.db, { role: "employee", name: "Pat A" });
   firmB = await createTestFirm(h.db, "Firm B");
   adminB = await createUser(h.db, { role: "admin", name: "Bea B", firmId: firmB });
   prepB = await createUser(h.db, { role: "employee", name: "Pip B", firmId: firmB });
+  superAdminB = await createUser(h.db, { role: "super_admin", name: "Platform Admin B", firmId: firmB });
 
   const a = await createClientWithPortalUser(h.db, adminA, "Alpha Client");
   A.client = a.client.id;
@@ -80,6 +84,27 @@ describe("firm B cannot read firm A by id", () => {
     await expect(listClientActivity(h.db, adminB, A.client)).rejects.toBeInstanceOf(NotFoundError);
     await expect(getClientTeam(h.db, adminB, A.client)).rejects.toBeInstanceOf(NotFoundError);
     await expect(listPortalUsers(h.db, adminB, A.client)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  describe("platform Super Admin firm scope", () => {
+    it("can select one firm for operations while firm admins remain tenant-scoped", async () => {
+      const scopeB = await resolveFirmContext(h.db, superAdmin, firmB);
+      expect(scopeB.firmId).toBe(firmB);
+      expect((await listTeam(h.db, scopeB)).map((member) => member.id)).toEqual(expect.arrayContaining([adminB.userId, prepB.userId, superAdminB.userId]));
+      expect((await listTeam(h.db, adminB)).map((member) => member.id)).not.toContain(superAdminB.userId);
+      await expect(setStaffActive(h.db, adminB, superAdminB.userId, false)).rejects.toBeInstanceOf(NotFoundError);
+      await expect(changeStaffRole(h.db, adminB, superAdminB.userId, "employee")).rejects.toBeInstanceOf(NotFoundError);
+
+      const adminScope = await resolveFirmContext(h.db, adminA, firmB);
+      expect(adminScope.firmId).toBe(adminA.firmId);
+      expect((await listTeam(h.db, adminScope)).map((member) => member.id)).not.toContain(adminB.userId);
+
+      await changeStaffRole(h.db, scopeB, prepB.userId, "manager");
+      expect((await listTeam(h.db, scopeB)).find((member) => member.id === prepB.userId)?.role).toBe("manager");
+      await changeStaffRole(h.db, scopeB, prepB.userId, "employee");
+      const recent = await listRecentActivity(h.db, scopeB);
+      expect(recent.some((entry) => entry.actorName === "Platform Admin" && entry.action === "staff.role_change")).toBe(true);
+    });
   });
 });
 
@@ -168,14 +193,16 @@ describe("client portal is per firm", () => {
   });
 });
 
-describe("public website and settings are per firm", () => {
+describe("organization profiles and announcements are private per firm", () => {
   it("each firm has its own profile and announcements", async () => {
-    expect((await getPublicProfile(h.db, adminA.firmId)).name).toBe("Alpha CPAs");
-    expect((await getPublicProfile(h.db, firmB)).name).not.toBe("Alpha CPAs");
+    expect((await getOrganizationProfile(h.db, adminA.firmId)).name).toBe("Alpha CPAs");
+    expect((await getOrganizationProfile(h.db, firmB)).name).not.toBe("Alpha CPAs");
     await saveFirmProfile(h.db, adminB, { name: "Beta Accounting" });
-    expect((await getPublicProfile(h.db, firmB)).name).toBe("Beta Accounting");
-    expect((await getPublicProfile(h.db, adminA.firmId)).name).toBe("Alpha CPAs");
-    expect(JSON.stringify(await getPublicAnnouncements(h.db, firmB))).not.toContain("Alpha news");
+    expect((await getOrganizationProfile(h.db, firmB)).name).toBe("Beta Accounting");
+    expect((await getOrganizationProfile(h.db, adminA.firmId)).name).toBe("Alpha CPAs");
+    await setAnnouncementPublished(h.db, adminA, A.announcement, true);
+    expect(JSON.stringify(await getPortalAnnouncements(h.db, portalB))).not.toContain("Alpha news");
+    expect(JSON.stringify(await getPortalAnnouncements(h.db, portalA))).toContain("Alpha news");
   });
 
   it("website inquiries land in the named firm only", async () => {

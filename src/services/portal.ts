@@ -24,7 +24,7 @@ import { parseInput } from "@/lib/validation";
 import { recordAudit } from "./audit";
 import { listPortalNotifications, type PortalNotification } from "./client-notifications";
 import { assertPortalClientAccess } from "./portal-access";
-import { getPublicProfile } from "./settings";
+import { getOrganizationProfile } from "./settings";
 import { logActivity } from "./timeline";
 
 /**
@@ -242,7 +242,16 @@ export interface PortalService {
 export interface PortalServices {
   services: PortalService[];
   accountManager: { name: string; email: string | null } | null;
-  firm: { name: string; phone: string; email: string };
+  firm: {
+    name: string;
+    phone: string;
+    email: string;
+    websiteUrl: string;
+    description: string;
+    addressLines: string[];
+    hours: [string, string][];
+    socialLinks: { label: string; url: string }[];
+  };
 }
 
 export async function listPortalServices(db: Db, actor: Actor, clientIdHint: string): Promise<PortalServices> {
@@ -271,12 +280,21 @@ export async function listPortalServices(db: Db, actor: Actor, clientIdHint: str
     .from(clients)
     .innerJoin(users, eq(users.id, clients.accountManagerId))
     .where(and(eq(clients.id, clientId), eq(clients.firmId, actor.firmId)));
-  const profile = await getPublicProfile(db, actor.firmId);
+  const profile = await getOrganizationProfile(db, actor.firmId);
 
   return {
     services: rows.map(({ total, completed, ...e }) => ({ ...e, progressPercent: total > 0 ? Math.round((completed / total) * 100) : null })),
     accountManager: mgr ? { name: mgr.name, email: mgr.email } : null,
-    firm: { name: profile.name, phone: profile.phone, email: profile.email },
+    firm: {
+      name: profile.name,
+      phone: profile.phone,
+      email: profile.email,
+      websiteUrl: profile.websiteUrl,
+      description: profile.description,
+      addressLines: profile.addressLines,
+      hours: profile.hours,
+      socialLinks: profile.socialLinks,
+    },
   };
 }
 

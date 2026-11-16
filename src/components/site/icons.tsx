@@ -1,4 +1,4 @@
-import type { ServiceIcon } from "@/content/site";
+type ServiceIcon = "person" | "building" | "lightbulb" | "ledger" | "chart";
 
 const common = {
   width: 24,

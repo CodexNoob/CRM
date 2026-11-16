@@ -36,10 +36,16 @@ Embedded PGlite allows **one process at a time**. Stop `npm run dev` before runn
 
 `/setup` stops working permanently once any account exists. Admins can't deactivate or demote themselves, and the last active admin can't be removed. Client portal logins are created from a client's page: **Portal access → Create invitation link**.
 
-Command-line fallback for staff invitations (prints a single-use set-password link):
+To bootstrap the first platform-wide Super Admin, use the command-line invitation after creating the first firm. The command requires database access and prints a single-use, 72-hour set-password link; deliver that link only through a trusted channel:
 
 ```bash
-npm run user:invite -- --email jane@firm.example --name "Jane Doe" --role admin   # admin | partner | preparer
+npm run user:invite -- --email platform-admin@example.com --name "Platform Admin" --role super_admin --firm firm-slug
+```
+
+Command-line fallback for other staff invitations:
+
+```bash
+npm run user:invite -- --email jane@firm.example --name "Jane Doe" --role admin   # admin | manager | employee | read_only
 ```
 
 ### Using a real PostgreSQL server (e.g. Supabase)
@@ -93,9 +99,13 @@ Only `.env.example` (placeholders) is committed. `.env*` files are git-ignored. 
 
 ## Public website
 
-`/` is the firm's public home page: services, how it works, client portal, announcements, contact and a client login link. All copy, contact details, services and announcements live in [`src/content/site.ts`](src/content/site.ts). **Replace every `PLACEHOLDER` value before launch** (firm name, phone, email, address, hours, announcement). Do not add testimonials, credentials or statistics unless they are real.
+`/` is the CRM product website. Its public identity and contact details are stored in the singleton `platform_settings` record and edited by a Super Admin at `/staff/platform-settings`. Public contact requests are stored in `platform_inquiries`; they are not firm leads and are not visible to subscribing firms.
 
-The page is statically rendered for speed. It includes search metadata, `AccountingService` structured data, `robots.txt` (which blocks `/staff`, `/portal`, `/login` and `/setup-password`) and `sitemap.xml` (set `APP_URL` to the real domain). Booking currently goes through phone and email. Online scheduling and an inquiry form that creates CRM leads are still deferred.
+Each subscribing firm has a separate, private organization profile, edited by that firm's Admin at `/staff/settings`. The profile is used in its authenticated workspace and client portal. Firm announcements are visible only to authenticated clients in that firm's portal. Public firm pages at `/f/<slug>` are not part of the product.
+
+The marketing page includes the product features, pricing, sign-up and contact form. `robots.txt` blocks private application routes, and `sitemap.xml` uses `APP_URL` for the public domain.
+
+**Billing limitation:** PayPal invoices currently use the platform's server-side PayPal account. A firm's organization profile does not change the PayPal merchant identity or settlement destination; per-firm PayPal authorization is not implemented.
 
 ## Architecture
 

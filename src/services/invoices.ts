@@ -6,7 +6,7 @@ import type { PayPalInvoiceSnapshot, PayPalInvoiceStatus } from "@/integrations/
 import { isManagerOrAdmin, type Actor } from "@/lib/auth/actor";
 import { AppError, ForbiddenError, IntegrationNotConfiguredError, NotFoundError, ValidationError } from "@/lib/errors";
 import { isUuid, parseInvoiceInput } from "@/lib/validation";
-import { assertClientAccess, inFirm, requireStaff, visibleClientsCondition } from "./access";
+import { assertClientAccess, inFirm, requirePermission, visibleClientsCondition } from "./access";
 import { recordAudit } from "./audit";
 
 /**
@@ -83,12 +83,12 @@ export function paypalFailure(what: string, error: unknown): AppError {
 
 /** Admins and partners handle billing corrections; preparers can create and send. */
 function requireBillingManager(actor: Actor) {
-  requireStaff(actor);
+  requirePermission(actor, "billing", "edit");
   if (!isManagerOrAdmin(actor)) throw new ForbiddenError("Only an admin or manager can cancel invoices.");
 }
 
 async function loadForStaff(db: Db, actor: Actor, id: string): Promise<Invoice> {
-  requireStaff(actor);
+  requirePermission(actor, "billing", "view");
   if (!isUuid(id)) throw new NotFoundError();
   const [row] = await db.select().from(invoices).where(and(eq(invoices.id, id), inFirm(invoices.firmId, actor))).limit(1);
   if (!row) throw new NotFoundError();
@@ -122,6 +122,7 @@ export async function createInvoice(
   provider: InvoiceProvider = paypalProvider(),
   now = new Date(),
 ): Promise<Invoice> {
+  requirePermission(actor, "billing", "create");
   await assertClientAccess(db, actor, clientId);
   const data = parseInvoiceInput(input);
   const [client] = await db.select({ name: clients.displayName, email: clients.email }).from(clients).where(and(eq(clients.id, clientId), inFirm(clients.firmId, actor)));
@@ -191,6 +192,7 @@ async function sendDraft(db: Db, actor: Actor, row: Invoice, provider: InvoicePr
 
 /** Re-sends a draft whose first send failed. */
 export async function sendInvoice(db: Db, actor: Actor, id: string, provider: InvoiceProvider = paypalProvider(), now = new Date()): Promise<Invoice> {
+  requirePermission(actor, "billing", "edit");
   const row = await loadForStaff(db, actor, id);
   requireConfigured(provider);
   return sendDraft(db, actor, row, provider, now);
@@ -238,6 +240,7 @@ async function syncRow(db: Db, row: Invoice, provider: InvoiceProvider, now: Dat
 
 /** Staff "Refresh status" button. */
 export async function refreshInvoice(db: Db, actor: Actor, id: string, provider: InvoiceProvider = paypalProvider(), now = new Date()): Promise<Invoice> {
+  requirePermission(actor, "billing", "view");
   const row = await loadForStaff(db, actor, id);
   requireConfigured(provider);
   try {
@@ -312,6 +315,7 @@ const listColumns = {
 
 /** Invoices for one client (staff). */
 export async function listClientInvoices(db: Db, actor: Actor, clientId: string, provider: InvoiceProvider = paypalProvider(), now = new Date()): Promise<InvoiceListRow[]> {
+  requirePermission(actor, "billing", "view");
   await assertClientAccess(db, actor, clientId);
   const mine = and(inFirm(invoices.firmId, actor), eq(invoices.clientId, clientId));
   await refreshStale(db, mine, provider, now);
@@ -326,6 +330,7 @@ export async function listInvoices(
   provider: InvoiceProvider = paypalProvider(),
   now = new Date(),
 ): Promise<InvoiceListRow[]> {
+  requirePermission(actor, "billing", "view");
   const scope = and(inFirm(invoices.firmId, actor), inArray(invoices.clientId, db.select({ id: clients.id }).from(clients).where(visibleClientsCondition(db, actor))));
   await refreshStale(db, scope, provider, now, 25);
   const statusFilter = opts.status === "open" ? inArray(invoices.status, OPEN_STATUSES) : opts.status ? eq(invoices.status, opts.status) : undefined;
@@ -347,6 +352,7 @@ export interface InvoiceTotals {
 
 /** Headline figures from the linked copies (refreshed from PayPal on list views). */
 export async function invoiceTotals(db: Db, actor: Actor, today: string, now = new Date()): Promise<InvoiceTotals> {
+  requirePermission(actor, "billing", "view");
   const scope = and(inFirm(invoices.firmId, actor), inArray(invoices.clientId, db.select({ id: clients.id }).from(clients).where(visibleClientsCondition(db, actor))));
   const since = new Date(now.getTime() - 30 * 24 * 3600_000);
   const [row] = await db

@@ -15,7 +15,7 @@ export const SUBSCRIPTION_STATUS: Record<string, { label: string; tone: Tone }> 
 
 const day = (d: Date | null) => (d ? formatDate(d.toISOString().slice(0, 10)) : "—");
 
-export function SubscriptionTable({ rows, showClient, canCancel }: { rows: SubscriptionRow[]; showClient: boolean; canCancel: boolean }) {
+export function SubscriptionTable({ rows, showClient, canCancel, firmId }: { rows: SubscriptionRow[]; showClient: boolean; canCancel: boolean; firmId?: string }) {
   return (
     <SimpleTable
       label="Subscriptions"
@@ -38,7 +38,7 @@ export function SubscriptionTable({ rows, showClient, canCancel }: { rows: Subsc
             </td>
             {showClient ? (
               <td className={td}>
-                <Link href={`/staff/clients/${r.clientId}?tab=billing`} className="hover:text-brand hover:underline">
+                <Link href={`/staff/clients/${r.clientId}?tab=billing${firmId ? `&firmId=${encodeURIComponent(firmId)}` : ""}`} className="hover:text-brand hover:underline">
                   {r.clientName}
                 </Link>
               </td>
@@ -54,7 +54,7 @@ export function SubscriptionTable({ rows, showClient, canCancel }: { rows: Subsc
               </Badge>
             </td>
             <td className={`${td} text-right`}>
-              <SubscriptionRowActions id={r.id} clientId={r.clientId} status={r.status} canCancel={canCancel} />
+              <SubscriptionRowActions id={r.id} clientId={r.clientId} status={r.status} canCancel={canCancel} firmId={firmId} />
             </td>
           </tr>
         );

@@ -102,6 +102,15 @@ export default async function PortalServicesPage() {
               <p className="text-xs text-muted">{firm.name || "The firm"}</p>
               {firm.phone ? <p><a href={`tel:${firm.phone.replace(/[^0-9+]/g, "")}`} className="text-brand-ink hover:underline">{firm.phone}</a></p> : null}
               {firm.email ? <p className="break-all"><a href={`mailto:${firm.email}`} className="text-brand-ink hover:underline">{firm.email}</a></p> : null}
+              {firm.addressLines.map((line) => <p key={line} className="text-xs text-muted">{line}</p>)}
+              {firm.websiteUrl ? <p className="break-all"><a href={firm.websiteUrl} target="_blank" rel="noopener noreferrer" className="text-brand-ink hover:underline">Organization website</a></p> : null}
+              {firm.socialLinks.map((item) => <p key={item.label}><a href={item.url} target="_blank" rel="noopener noreferrer" className="text-brand-ink hover:underline">{item.label}</a></p>)}
+              {firm.description ? <p className="whitespace-pre-wrap text-xs text-muted">{firm.description}</p> : null}
+              {firm.hours.length ? (
+                <ul className="border-t border-line pt-2 text-xs text-muted">
+                  {firm.hours.map(([days, hours]) => <li key={days} className="flex justify-between gap-2"><span>{days}</span><span className="text-right">{hours}</span></li>)}
+                </ul>
+              ) : null}
             </div>
             <p className="text-xs text-muted">For questions about a service, send a message from the Messages tab.</p>
           </div>

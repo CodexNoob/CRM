@@ -102,6 +102,17 @@ describe("client-collaboration migration (0020) on existing data", () => {
   });
 });
 
+describe("profile separation migration (0022)", () => {
+  it("preserves organization data and adds regional defaults without seeding platform data from a tenant", async () => {
+    const profiles = await q<{ name: string; time_zone: string; locale: string; currency: string }>(
+      "select name, time_zone, locale, currency from firm_profile",
+    );
+    expect(profiles).toEqual([{ name: "Duot Tax Services", time_zone: "America/New_York", locale: "en-US", currency: "USD" }]);
+    expect(await q("select * from platform_settings")).toEqual([]);
+    expect(await q("select * from platform_inquiries")).toEqual([]);
+  });
+});
+
 describe("multi-firm migration on existing single-firm data", () => {
   it("creates exactly one active firm named after the firm profile", async () => {
     const firms = await q<{ name: string; slug: string; status: string }>("select name, slug, status from firms");

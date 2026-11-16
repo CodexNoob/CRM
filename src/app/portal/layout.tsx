@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { logoutAction } from "@/app/actions/auth";
 import { getDb } from "@/db";
 import { PortalClientSwitcher, PortalNotificationsBell, PortalTabs, type PortalTab } from "@/components/portal-tabs";
@@ -5,7 +6,7 @@ import { requirePortalContext } from "@/lib/auth/portal-context";
 import { countUnreadPortalNotifications, listPortalNotifications } from "@/services/client-notifications";
 import { countOpenPortalInvoices } from "@/services/invoices";
 import { countPortalUnreadMessages } from "@/services/portal";
-import { getPublicProfile } from "@/services/settings";
+import { getOrganizationProfile } from "@/services/settings";
 
 /** E-signatures are shown only once a real provider is configured and enabled. */
 const signaturesEnabled = () => process.env.DROPBOX_SIGN_ENABLED === "1" && !!process.env.DROPBOX_SIGN_API_KEY?.trim();
@@ -19,7 +20,7 @@ export default async function PortalLayout({ children }: { children: React.React
   const [unreadMessages, openInvoices, profile, notifications, unreadNotifications] = await Promise.all([
     countPortalUnreadMessages(db, ctx.actor, clientId),
     countOpenPortalInvoices(db, scopedActor),
-    getPublicProfile(db, ctx.actor.firmId),
+    getOrganizationProfile(db, ctx.actor.firmId),
     listPortalNotifications(db, ctx.actor, clientId, 15),
     countUnreadPortalNotifications(db, ctx.actor, clientId),
   ]);
@@ -39,9 +40,13 @@ export default async function PortalLayout({ children }: { children: React.React
       <header className="border-b border-line bg-surface">
         <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
           <span className="flex min-w-0 items-center gap-2 font-semibold">
-            <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-md bg-brand text-xs font-bold text-white">
-              {profile.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "P"}
-            </span>
+            {profile.logoDataUrl ? (
+              <Image src={profile.logoDataUrl} alt="" width={28} height={28} unoptimized className="size-7 shrink-0 rounded-md object-contain" />
+            ) : (
+              <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-md bg-brand text-xs font-bold text-white">
+                {profile.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "P"}
+              </span>
+            )}
             <span className="truncate">{profile.name}</span>
             <span className="hidden text-sm font-normal text-muted sm:inline">· Client Portal</span>
           </span>
@@ -49,7 +54,7 @@ export default async function PortalLayout({ children }: { children: React.React
             {ctx.clients.length > 1 ? (
               <PortalClientSwitcher clients={ctx.clients.map((c) => ({ clientId: c.clientId, name: c.name }))} current={clientId} />
             ) : (
-              <span className="hidden max-w-[14rem] truncate text-sm text-muted sm:inline">{ctx.client.name}</span>
+              <span className="hidden max-w-56 truncate text-sm text-muted sm:inline">{ctx.client.name}</span>
             )}
             <PortalNotificationsBell
               unread={unreadNotifications}

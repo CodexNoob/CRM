@@ -1,14 +1,13 @@
 import { asc, eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { firms, type Firm } from "@/db/schema";
-import { NotFoundError } from "@/lib/errors";
+import type { Actor } from "@/lib/auth/actor";
+import { ForbiddenError, NotFoundError } from "@/lib/errors";
+import { isUuid } from "@/lib/validation";
 
-/**
- * Firms (tenants). Public pages that are not yet per-firm (the current home page
- * and its inquiry form) belong to the DEFAULT firm: DEFAULT_FIRM_SLUG if set,
- * otherwise the oldest firm (firm #1, which owns the pre-multi-firm data).
- */
+/** Firms are private tenants; the product marketing site is platform-owned. */
 
+/** Internal slug lookup for management tools; not used for public firm routing. */
 export async function getFirmBySlug(db: Db, slug: string): Promise<Firm> {
   const [firm] = await db.select().from(firms).where(eq(firms.slug, slug)).limit(1);
   if (!firm) throw new NotFoundError();
@@ -21,7 +20,21 @@ export async function getFirm(db: Db, firmId: string): Promise<Firm> {
   return firm;
 }
 
-/** The firm that owns the public home page. Null if no firm exists yet (before first-run setup). */
+export async function listPlatformFirms(db: Db, actor: Actor) {
+  if (actor.role !== "super_admin") throw new ForbiddenError();
+  return db.select({ id: firms.id, name: firms.name }).from(firms).orderBy(asc(firms.name)).limit(1000);
+}
+
+/** Resolves the selected tenant for platform-admin pages; other roles stay in their own firm. */
+export async function resolveFirmContext(db: Db, actor: Actor, requestedFirmId?: string): Promise<Actor> {
+  if (actor.role !== "super_admin") return actor;
+  const firmId = requestedFirmId?.trim() || actor.firmId;
+  if (!isUuid(firmId)) throw new NotFoundError();
+  const firm = await getFirm(db, firmId);
+  return { ...actor, firmId: firm.id };
+}
+
+/** The operator workspace used during first-run setup. Null before setup. */
 export async function getDefaultFirm(db: Db): Promise<Firm | null> {
   const slug = process.env.DEFAULT_FIRM_SLUG?.trim();
   if (slug) {

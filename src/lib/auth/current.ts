@@ -34,7 +34,7 @@ export async function requireStaffActor(opts: { allowLocked?: boolean } = {}): P
   const actor = await getCurrentActor();
   if (!actor) redirect("/login");
   if (actor.role === "client") redirect("/portal");
-  if (!opts.allowLocked && (await getCurrentFirmAccess(actor.firmId)).locked) redirect("/staff");
+  if (actor.role !== "super_admin" && !opts.allowLocked && (await getCurrentFirmAccess(actor.firmId)).locked) redirect("/staff");
   return actor;
 }
 

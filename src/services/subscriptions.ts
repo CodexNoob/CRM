@@ -6,7 +6,7 @@ import type { PayPalSubscriptionSnapshot, PayPalSubscriptionStatus } from "@/int
 import { isManagerOrAdmin, type Actor } from "@/lib/auth/actor";
 import { ForbiddenError, IntegrationNotConfiguredError, NotFoundError, ValidationError } from "@/lib/errors";
 import { isUuid, parseInput, subscriptionInputSchema } from "@/lib/validation";
-import { assertClientAccess, inFirm, requireStaff, visibleClientsCondition } from "./access";
+import { assertClientAccess, inFirm, requirePermission, visibleClientsCondition } from "./access";
 import { recordAudit } from "./audit";
 import { paypalFailure } from "./invoices";
 
@@ -110,6 +110,7 @@ async function refreshStale(db: Db, where: ReturnType<typeof and>, p: Subscripti
 /* ───────── Staff ───────── */
 
 export async function createSubscriptionPlan(db: Db, actor: Actor, clientId: string, input: Record<string, unknown>, p: SubscriptionProvider = paypalSubscriptions()): Promise<Subscription> {
+  requirePermission(actor, "billing", "create");
   await assertClientAccess(db, actor, clientId);
   const data = parseInput(subscriptionInputSchema, input);
   const [client] = await db.select({ email: clients.email }).from(clients).where(and(eq(clients.id, clientId), inFirm(clients.firmId, actor)));
@@ -130,7 +131,7 @@ export async function createSubscriptionPlan(db: Db, actor: Actor, clientId: str
 }
 
 async function loadForStaff(db: Db, actor: Actor, id: string): Promise<Subscription> {
-  requireStaff(actor);
+  requirePermission(actor, "billing", "view");
   if (!isUuid(id)) throw new NotFoundError();
   const [row] = await db.select().from(subscriptions).where(and(eq(subscriptions.id, id), inFirm(subscriptions.firmId, actor)));
   if (!row) throw new NotFoundError();
@@ -150,7 +151,7 @@ export async function refreshSubscription(db: Db, actor: Actor, id: string, p: S
 
 /** Stops future charges. Admin/partner only (billing correction). */
 export async function cancelSubscription(db: Db, actor: Actor, id: string, p: SubscriptionProvider = paypalSubscriptions(), now = new Date()): Promise<void> {
-  requireStaff(actor);
+  requirePermission(actor, "billing", "edit");
   if (!isManagerOrAdmin(actor)) throw new ForbiddenError("Only an admin or manager can cancel subscriptions.");
   const row = await loadForStaff(db, actor, id);
   if (!LIVE_STATUSES.includes(row.status)) throw new ValidationError({ _form: ["This subscription has already ended."] });
@@ -195,6 +196,7 @@ const cols = {
 };
 
 export async function listClientSubscriptions(db: Db, actor: Actor, clientId: string, p: SubscriptionProvider = paypalSubscriptions(), now = new Date()): Promise<SubscriptionRow[]> {
+  requirePermission(actor, "billing", "view");
   await assertClientAccess(db, actor, clientId);
   const mine = and(inFirm(subscriptions.firmId, actor), eq(subscriptions.clientId, clientId));
   await refreshStale(db, mine, p, now);
@@ -202,6 +204,7 @@ export async function listClientSubscriptions(db: Db, actor: Actor, clientId: st
 }
 
 export async function listSubscriptions(db: Db, actor: Actor, p: SubscriptionProvider = paypalSubscriptions(), now = new Date()): Promise<SubscriptionRow[]> {
+  requirePermission(actor, "billing", "view");
   const scope = and(inFirm(subscriptions.firmId, actor), inArray(subscriptions.clientId, db.select({ id: clients.id }).from(clients).where(visibleClientsCondition(db, actor))));
   await refreshStale(db, scope, p, now);
   return db.select(cols).from(subscriptions).innerJoin(clients, eq(clients.id, subscriptions.clientId)).where(scope).orderBy(desc(subscriptions.createdAt)).limit(500);

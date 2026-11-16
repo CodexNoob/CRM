@@ -10,9 +10,13 @@ import { cx } from "@/components/ui";
 import { idleState } from "@/lib/action-state";
 import { ROLE_LABELS } from "@/lib/labels";
 
-const roleOptions = (["admin", "manager", "employee"] as const).map((r) => ({ value: r, label: ROLE_LABELS[r] }));
+const roleOptions = (includeSuperAdmin: boolean) =>
+  (includeSuperAdmin
+    ? ["super_admin", "admin", "manager", "employee", "read_only"] as const
+    : ["admin", "manager", "employee", "read_only"] as const
+  ).map((r) => ({ value: r, label: ROLE_LABELS[r] }));
 
-export function InviteStaffForm() {
+export function InviteStaffForm({ firmId, canManageSuperAdmins }: { firmId: string; canManageSuperAdmins: boolean }) {
   const [state, action] = useActionState(inviteStaffAction, idleState);
   const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => {
@@ -23,22 +27,24 @@ export function InviteStaffForm() {
 
   return (
     <form ref={formRef} action={action} className="space-y-3" noValidate>
+      <input type="hidden" name="firmId" value={firmId} />
       <FormMessage state={state} />
       {link ? <InviteLink link={link} id="staff-invite-link" /> : null}
       <TextField name="name" label="Name" required state={fieldState} />
       <TextField name="email" label="Work email" type="email" inputMode="email" autoComplete="off" required state={fieldState} />
-      <SelectField name="role" label="Role" required state={fieldState} defaultValue="employee" options={roleOptions} />
+      <SelectField name="role" label="Role" required state={fieldState} defaultValue="employee" options={roleOptions(canManageSuperAdmins)} />
       <SubmitButton pendingText="Creating…" className="w-full">Create invitation link</SubmitButton>
     </form>
   );
 }
 
 /** Inline role editor for a table row. Saves on change. */
-export function RoleSelect({ userId, name, role, disabled }: { userId: string; name: string; role: string; disabled?: boolean }) {
+export function RoleSelect({ userId, name, role, firmId, canManageSuperAdmins, disabled }: { userId: string; name: string; role: string; firmId: string; canManageSuperAdmins: boolean; disabled?: boolean }) {
   const [state, action, pending] = useActionState(changeStaffRoleAction.bind(null, userId), idleState);
   const formRef = useRef<HTMLFormElement>(null);
   return (
     <form ref={formRef} action={action} className="space-y-1">
+      <input type="hidden" name="firmId" value={firmId} />
       <label htmlFor={`role-${userId}`} className="sr-only">Role for {name}</label>
       <select
         id={`role-${userId}`}
@@ -48,7 +54,7 @@ export function RoleSelect({ userId, name, role, disabled }: { userId: string; n
         onChange={() => formRef.current?.requestSubmit()}
         className={cx(inputClass, "w-40")}
       >
-        {roleOptions.map((o) => (
+        {roleOptions(canManageSuperAdmins).map((o) => (
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}
       </select>
@@ -62,9 +68,9 @@ export function RoleSelect({ userId, name, role, disabled }: { userId: string; n
 }
 
 /** Row menu: new sign-in link (password reset) and deactivate / reactivate. */
-export function MemberMenu({ userId, name, isActive }: { userId: string; name: string; isActive: boolean }) {
-  const [linkState, linkAction] = useActionState(sendStaffLinkAction.bind(null, userId), idleState);
-  const [activeState, activeAction] = useActionState(setStaffActiveAction.bind(null, userId, !isActive), idleState);
+export function MemberMenu({ userId, name, isActive, firmId }: { userId: string; name: string; isActive: boolean; firmId: string }) {
+  const [linkState, linkAction] = useActionState(sendStaffLinkAction.bind(null, userId, firmId), idleState);
+  const [activeState, activeAction] = useActionState(setStaffActiveAction.bind(null, userId, !isActive, firmId), idleState);
   const link = linkState.status === "success" ? linkState.data?.link : undefined;
   const error = [linkState, activeState].find((s) => s.status === "error");
 

@@ -46,3 +46,25 @@ export async function notifyNewInquiry(lead: { id: string; name: string; service
 
   if (!result.ok) console.error("Inquiry alert email failed", { leadId: lead.id, error: result.error });
 }
+
+export async function notifyPlatformInquiry(inquiryId: string): Promise<void> {
+  const cfg = emailConfig();
+  if (!cfg.isConfigured || !cfg.inquiryTo) return;
+  const link = `${appUrl()}/staff/platform-settings`;
+  const result = await sendEmail({
+    to: cfg.inquiryTo,
+    subject: "New CRM platform inquiry",
+    text: [
+      "A new inquiry was submitted through the CRM product website.",
+      "",
+      "Sign in to Platform Settings to review it:",
+      link,
+    ].join("\n"),
+    html: `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#202b38">
+  <p>A new inquiry was submitted through the CRM product website.</p>
+  <p><a href="${escapeHtml(link)}" style="display:inline-block;background:#1f3a56;color:#ffffff;text-decoration:none;padding:10px 16px;border-radius:6px">Review platform inquiries</a></p>
+  <p style="font-size:13px;color:#6b7280">Inquiry ID: ${escapeHtml(inquiryId)}</p>
+</div>`,
+  });
+  if (!result.ok) console.error("Platform inquiry alert email failed", { inquiryId, error: result.error });
+}

@@ -1,6 +1,6 @@
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import type { Db } from "@/db";
-import { users } from "@/db/schema";
+import { users, type UserRole } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
 import { invalidateUserSessions } from "@/lib/auth/sessions";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
@@ -12,14 +12,14 @@ import { createStaffInvitation, findUserByEmail, issueInvitation } from "./users
 /** Staff account management. Admin only; every rule is enforced here, not in the UI. */
 
 function requireAdmin(actor: Actor): void {
-  if (actor.role !== "admin") throw new ForbiddenError();
+  if (actor.role !== "admin" && actor.role !== "super_admin") throw new ForbiddenError();
 }
 
 export interface TeamMember {
   id: string;
   name: string;
   email: string;
-  role: "admin" | "manager" | "employee";
+  role: Exclude<UserRole, "client">;
   isActive: boolean;
   hasPassword: boolean;
   createdAt: Date;
@@ -38,7 +38,11 @@ export async function listTeam(db: Db, actor: Actor): Promise<TeamMember[]> {
       createdAt: users.createdAt,
     })
     .from(users)
-    .where(and(inFirm(users.firmId, actor), ne(users.role, "client")))
+    .where(and(
+      inFirm(users.firmId, actor),
+      ne(users.role, "client"),
+      actor.role === "super_admin" ? undefined : ne(users.role, "super_admin"),
+    ))
     .orderBy(asc(users.name));
   return rows as TeamMember[];
 }
@@ -47,6 +51,7 @@ export async function listTeam(db: Db, actor: Actor): Promise<TeamMember[]> {
 export async function inviteStaff(db: Db, actor: Actor, input: unknown): Promise<{ token: string; userId: string }> {
   requireAdmin(actor);
   const data = parseInput(staffInviteSchema, input);
+  if (data.role === "super_admin" && actor.role !== "super_admin") throw new ForbiddenError();
   if (await findUserByEmail(db, data.email)) {
     throw new ValidationError({ email: ["Someone already has an account with this email. Use “New sign-in link” on their row instead."] });
   }
@@ -58,6 +63,7 @@ async function loadStaffTarget(db: Db, actor: Actor, userId: string) {
   if (!isUuid(userId)) throw new NotFoundError();
   const [user] = await db.select().from(users).where(and(eq(users.id, userId), inFirm(users.firmId, actor))).limit(1);
   if (!user || user.role === "client") throw new NotFoundError();
+  if (user.role === "super_admin" && actor.role !== "super_admin") throw new NotFoundError();
   return user;
 }
 
@@ -99,6 +105,7 @@ export async function setStaffActive(db: Db, actor: Actor, userId: string, activ
 export async function changeStaffRole(db: Db, actor: Actor, userId: string, role: unknown): Promise<void> {
   const user = await loadStaffTarget(db, actor, userId);
   const next = parseInput(staffRoleSchema, role);
+  if (next === "super_admin" && actor.role !== "super_admin") throw new ForbiddenError();
   if (user.id === actor.userId) throw new ValidationError({ _form: ["You can’t change your own role."] });
   if (user.role === next) return;
   if (user.role === "admin" && user.isActive && (await otherActiveAdmins(db, actor.firmId, user.id)) === 0) {

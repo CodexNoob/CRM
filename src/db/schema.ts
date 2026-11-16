@@ -29,7 +29,7 @@ import {
  * employee: assigned clients/work (formerly "preparer"). read_only: view all firm records, change nothing.
  * client: portal only.
  */
-export const userRole = pgEnum("user_role", ["admin", "manager", "employee", "read_only", "client"]);
+export const userRole = pgEnum("user_role", ["super_admin", "admin", "manager", "employee", "read_only", "client"]);
 export const clientType = pgEnum("client_type", ["individual", "household", "business"]);
 export const clientStatus = pgEnum("client_status", ["prospect", "onboarding", "active", "inactive", "on_hold", "former"]);
 export const onboardingStatus = pgEnum("onboarding_status", ["not_started", "information_requested", "awaiting_documents", "under_verification", "completed"]);
@@ -113,6 +113,11 @@ const timestamps = {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 };
 
+const bytea = customType<{ data: Buffer; driverData: Buffer | Uint8Array }>({
+  dataType: () => "bytea",
+  fromDriver: (v) => (Buffer.isBuffer(v) ? v : Buffer.from(v)),
+});
+
 /* ───────────────────────── Tenancy ───────────────────────── */
 
 export const firmStatus = pgEnum("firm_status", ["trial", "active", "past_due", "cancelled"]);
@@ -128,7 +133,7 @@ export const firms = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     name: text("name").notNull(),
-    /** URL-safe handle for the firm's public page (/f/<slug>). */
+    /** URL-safe tenant handle retained for internal/future integrations. */
     slug: text("slug").notNull(),
     status: firmStatus("status").notNull().default("trial"),
     trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
@@ -151,6 +156,41 @@ export const platformPlans = pgTable("platform_plans", {
   paypalPlanId: text("paypal_plan_id").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }).enableRLS();
+
+/** Singleton platform-owned identity; never tied to a subscribing firm's tenant record. */
+export const platformSettings = pgTable("platform_settings", {
+  id: text("id").primaryKey().default("default"),
+  name: text("name").notNull().default("CRM Platform"),
+  description: text("description"),
+  websiteUrl: text("website_url"),
+  officialEmail: text("official_email"),
+  phone: text("phone"),
+  addressLine1: text("address_line1"),
+  addressLine2: text("address_line2"),
+  salesEmail: text("sales_email"),
+  supportEmail: text("support_email"),
+  supportPhone: text("support_phone"),
+  logoData: bytea("logo_data"),
+  logoContentType: text("logo_content_type"),
+  updatedById: uuid("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}).enableRLS();
+
+/** Contact requests for the CRM operator; intentionally not firm leads and not tenant-scoped. */
+export const platformInquiries = pgTable(
+  "platform_inquiries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    phone: text("phone"),
+    topic: text("topic").notNull(),
+    message: text("message").notNull(),
+    status: text("status").notNull().default("new"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("platform_inquiries_created_idx").on(t.createdAt)],
+).enableRLS();
 
 const firmId = () =>
   uuid("firm_id")
@@ -540,11 +580,6 @@ export const documents = pgTable(
   ],
 ).enableRLS();
 
-const bytea = customType<{ data: Buffer; driverData: Buffer | Uint8Array }>({
-  dataType: () => "bytea",
-  fromDriver: (v) => (Buffer.isBuffer(v) ? v : Buffer.from(v)),
-});
-
 /** Database-backed file storage (pilot). Encrypted at rest with the rest of the database. */
 export const documentBlobs = pgTable("document_blobs", {
   storageKey: text("storage_key").primaryKey(),
@@ -662,9 +697,9 @@ export const appointments = pgTable(
   ],
 ).enableRLS();
 
-/* ───────────────────────── Firm settings (drive the public website) ───────────────────────── */
+/* ───────────────────────── Tenant organization profile ───────────────────────── */
 
-/** One row per firm holding its public details (shown on the firm's public page). */
+/** Private organization details used in the firm's workspace and business operations. */
 export const firmProfile = pgTable("firm_profile", {
   firmId: uuid("firm_id")
     .primaryKey()
@@ -676,6 +711,14 @@ export const firmProfile = pgTable("firm_profile", {
   addressLine2: text("address_line2"),
   hours: jsonb("hours").$type<[string, string][]>(),
   tagline: text("tagline"),
+  websiteUrl: text("website_url"),
+  description: text("description"),
+  socialLinks: jsonb("social_links").$type<{ label: string; url: string }[]>(),
+  timeZone: text("time_zone").notNull().default("America/New_York"),
+  locale: text("locale").notNull().default("en-US"),
+  currency: text("currency").notNull().default("USD"),
+  logoData: bytea("logo_data"),
+  logoContentType: text("logo_content_type"),
   updatedById: uuid("updated_by_id").references(() => users.id, { onDelete: "set null" }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }).enableRLS();

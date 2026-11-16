@@ -49,7 +49,7 @@ export async function signUpFirm(db: Db, input: Record<string, unknown>, now = n
 
     const firm = await createFirm(t, { name: data.firmName, status: "trial", trialEndsAt: trialEndsAt(now) });
     const [user] = await t.insert(users).values({ firmId: firm.id, email: data.email, name: data.name, role: "admin", passwordHash }).returning();
-    // The firm's public page starts with its name; contact details are added in Settings.
+    // Seed a private organization profile with the chosen firm name and admin contact.
     await t.insert(firmProfile).values({ firmId: firm.id, name: data.firmName, email: data.email, updatedById: user!.id });
     await recordAudit(t, { firmId: firm.id, actorUserId: user!.id, action: "firm.signup", entityType: "firm", entityId: firm.id });
     return actorFromUser(user!);

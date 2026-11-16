@@ -10,7 +10,7 @@ import { ROLE_LABELS } from "@/lib/labels";
 import { getBillingOverview } from "@/services/firm-billing";
 import { countLeadsByStatus } from "@/services/leads";
 import { countUnreadForStaff } from "@/services/messages";
-import { getPublicProfile } from "@/services/settings";
+import { getOrganizationProfile } from "@/services/settings";
 import { countMyOpenTasks } from "@/services/tasks";
 import { getNotifications } from "@/services/workspace";
 import { BillingBanner } from "./billing/billing-banner";
@@ -25,15 +25,16 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   // The layout renders for locked firms too (to show the subscription modal); pages enforce the lock.
   const actor = await requireStaffActor({ allowLocked: true });
   const access = await getCurrentFirmAccess(actor.firmId);
+  const firmLocked = actor.role !== "super_admin" && access.locked;
   const db = getDb();
   // Admin-only items are hidden here AND refused by their pages and services on the server.
-  const sections = navForRole(actor.role === "admin");
+  const sections = navForRole(actor);
   const [myOpenTasks, leadCounts, unreadMessages, notifications, profile, billing, jar] = await Promise.all([
-    access.locked ? 0 : countMyOpenTasks(db, actor),
-    access.locked ? null : countLeadsByStatus(db, actor),
-    access.locked ? 0 : countUnreadForStaff(db, actor),
-    access.locked ? [] : getNotifications(db, actor),
-    getPublicProfile(db, actor.firmId),
+    firmLocked ? 0 : countMyOpenTasks(db, actor),
+    firmLocked ? null : countLeadsByStatus(db, actor),
+    firmLocked ? 0 : countUnreadForStaff(db, actor),
+    firmLocked ? [] : getNotifications(db, actor),
+    getOrganizationProfile(db, actor.firmId),
     getBillingOverview(db, actor),
     cookies(),
   ]);
@@ -42,7 +43,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   const interval = firm.billingInterval === "month" || firm.billingInterval === "year" ? firm.billingInterval : null;
   const summary: SubscriptionSummary = {
     state: billing.access.state,
-    locked: billing.access.locked,
+    locked: firmLocked,
     trialDaysLeft: billing.access.trialDaysLeft,
     reason: billing.access.reason,
     canManage: billing.canManage,
@@ -60,13 +61,13 @@ export default async function StaffLayout({ children }: { children: React.ReactN
       sections={sections}
       badges={{ myOpenTasks, newLeads: leadCounts?.new ?? 0, unreadMessages }}
       initialCollapsed={jar.get("crm_sidebar")?.value === "collapsed"}
-      workspace={{ name: profile.name, initials: initials(profile.name) }}
-      user={{ name: actor.name, email: actor.email, roleLabel: ROLE_LABELS[actor.role], isAdmin: actor.role === "admin" }}
+      workspace={{ name: profile.name, initials: initials(profile.name), logoDataUrl: profile.logoDataUrl }}
+      user={{ name: actor.name, email: actor.email, roleLabel: ROLE_LABELS[actor.role], isAdmin: actor.role === "admin" || actor.role === "super_admin" }}
       notifications={notifications}
     >
-      {access.locked ? null : <BillingBanner access={access} isAdmin={actor.role === "admin"} />}
+      {firmLocked ? null : <BillingBanner access={access} isAdmin={actor.role === "admin" || actor.role === "super_admin"} />}
       {/* While locked, no CRM content renders behind the modal. */}
-      {access.locked ? <div aria-hidden className="min-h-[60vh]" /> : children}
+      {firmLocked ? <div aria-hidden className="min-h-[60vh]" /> : children}
       <Suspense fallback={null}>
         <SubscriptionModal summary={summary} />
       </Suspense>
