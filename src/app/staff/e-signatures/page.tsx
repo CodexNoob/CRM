@@ -57,10 +57,6 @@ export default async function ESignaturesPage() {
             Requests may be legally binding. Set <code>DROPBOX_SIGN_TEST_MODE=1</code> and restart or redeploy to return to test mode.
           </Alert>
         </div>
-      ) : cfg.testMode ? (
-        <div className="mb-4">
-          <Alert tone="warning">Test mode is on (<code>DROPBOX_SIGN_TEST_MODE=1</code>): requests are not legally binding.</Alert>
-        </div>
       ) : null}
       <StatStrip
         className="mb-5"
