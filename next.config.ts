@@ -15,6 +15,11 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // Native / WASM database and hashing packages must not be bundled.
   serverExternalPackages: ["@electric-sql/pglite", "@node-rs/argon2", "pg"],
+  // DATABASE_SSL_CA_PATH is resolved at runtime, so Next.js cannot infer this
+  // file as a dependency while tracing the server bundle for Vercel.
+  outputFileTracingIncludes: {
+    "/*": ["./certs/supabase-ca-2021.crt"],
+  },
   experimental: {
     // Document uploads go through Server Actions; files are capped at 25 MB in src/lib/file-rules.ts.
     serverActions: { bodySizeLimit: "26mb" },
