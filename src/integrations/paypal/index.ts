@@ -40,8 +40,10 @@ let cachedToken: { value: string; expiresAt: number; key: string } | null = null
 export function paypalConfig(env: Record<string, string | undefined> = process.env): PayPalConfig {
   const requestedEnvironment = env.PAYPAL_ENVIRONMENT?.trim().toLowerCase();
   const environment: PayPalEnvironment = requestedEnvironment === "live" ? "live" : "sandbox";
-  const productionMode = env.NODE_ENV === "production";
-  const environmentValid = !productionMode || requestedEnvironment === "live";
+  const productionDeployment = env.VERCEL_ENV
+    ? env.VERCEL_ENV === "production"
+    : env.NODE_ENV === "production";
+  const environmentValid = !productionDeployment || requestedEnvironment === "live";
   const hasCredentials = !!env.PAYPAL_CLIENT_ID?.trim() && !!env.PAYPAL_CLIENT_SECRET?.trim();
   const isConfigured = hasCredentials && environmentValid;
   return {

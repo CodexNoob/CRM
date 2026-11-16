@@ -45,6 +45,32 @@ describe("PayPal configuration and webhooks", () => {
     });
   });
 
+  it("allows sandbox credentials in Vercel Preview builds", () => {
+    expect(paypalConfig({
+      NODE_ENV: "production",
+      VERCEL_ENV: "preview",
+      PAYPAL_CLIENT_ID: "client-id",
+      PAYPAL_CLIENT_SECRET: "server-secret",
+      PAYPAL_ENVIRONMENT: "sandbox",
+    })).toMatchObject({
+      environment: "sandbox",
+      isConfigured: true,
+    });
+  });
+
+  it("requires live credentials in Vercel Production builds", () => {
+    expect(paypalConfig({
+      NODE_ENV: "development",
+      VERCEL_ENV: "production",
+      PAYPAL_CLIENT_ID: "client-id",
+      PAYPAL_CLIENT_SECRET: "server-secret",
+      PAYPAL_ENVIRONMENT: "sandbox",
+    })).toMatchObject({
+      environment: "sandbox",
+      isConfigured: false,
+    });
+  });
+
   it("processes verified subscription changes once and ignores stale events", async () => {
     const firmId = await createTestFirm(h.db, `PayPal Firm ${crypto.randomUUID()}`);
     await h.db.update(firms).set({
