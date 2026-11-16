@@ -7,7 +7,7 @@ import { ForbiddenError, IntegrationNotConfiguredError, ValidationError } from "
 import { login } from "@/lib/auth/login";
 import { cancelFirmSubscription, cancelPendingFirmCheckout, firmAccess, getBillingOverview, startFirmCheckout } from "@/services/firm-billing";
 import type { PayPalSubscriptionProvider } from "@/services/firm-billing";
-import type { PayPalSubscriptionSnapshot } from "@/integrations/paypal";
+import { PayPalError, type PayPalSubscriptionSnapshot } from "@/integrations/paypal";
 import { getFirm } from "@/services/firms";
 import { getOrganizationProfile, saveFirmProfile } from "@/services/settings";
 import { SignupRejectedError, signUpFirm } from "@/services/signup";
@@ -153,6 +153,39 @@ describe("subscribing to the software", () => {
     expect(firmAccess(cancelled, new Date("2028-01-01")).locked).toBe(true);
   });
 
+  it("reconciles a stale active status when PayPal says approval is still pending", async () => {
+    const actor = await signUpFirm(h.db, signup({ firmName: "Unactivated Subscription Co" }));
+    await h.db.update(firms).set({
+      status: "active",
+      paypalSubscriptionId: "I-not-activated",
+      billingInterval: "month",
+    }).where(eq(firms.id, actor.firmId));
+    let cancellations = 0;
+    const provider: PayPalSubscriptionProvider = {
+      isConfigured: true,
+      isWebhookConfigured: true,
+      currency: "USD",
+      createPlan: async () => ({ planId: "unused" }),
+      startSubscription: async () => { throw new Error("not used"); },
+      getSubscription: async (id) => ({
+        id,
+        status: "APPROVAL_PENDING",
+        nextBillingAt: null,
+        lastPaymentAt: null,
+        lastPaymentCents: null,
+        approveUrl: "https://www.paypal.com/checkoutnow?token=pending",
+      }),
+      cancelSubscription: async () => { cancellations += 1; },
+    };
+
+    await expect(cancelFirmSubscription(h.db, actor, provider)).rejects.toBeInstanceOf(ValidationError);
+    expect(await getFirm(h.db, actor.firmId)).toMatchObject({
+      status: "trial",
+      paypalSubscriptionId: "I-not-activated",
+    });
+    expect(cancellations).toBe(0);
+  });
+
   it("clears a declined PayPal approval checkout without cancelling an active subscription", async () => {
     const firmId = await signUpFirm(h.db, signup({ firmName: "Declined Co" })).then((actor) => actor.firmId);
     const admin = await createUser(h.db, { role: "admin", firmId });
@@ -178,6 +211,39 @@ describe("subscribing to the software", () => {
     expect(cancellations).toBe(1);
     expect((await getFirm(h.db, firmId)).paypalSubscriptionId).toBeNull();
     expect((await getFirm(h.db, firmId)).paypalCheckoutRequestId).toBeNull();
+  });
+
+  it("clears a pending checkout when PayPal says the resource no longer exists", async () => {
+    const firmId = await signUpFirm(h.db, signup({ firmName: "Uncancelled Co" })).then((actor) => actor.firmId);
+    const admin = await createUser(h.db, { role: "admin", firmId });
+    await h.db.update(firms).set({
+      paypalSubscriptionId: "I-pending-not-found",
+      billingInterval: "month",
+    }).where(eq(firms.id, firmId));
+    const provider: PayPalSubscriptionProvider = {
+      isConfigured: true,
+      isWebhookConfigured: true,
+      currency: "USD",
+      createPlan: async () => ({ planId: "unused" }),
+      startSubscription: async () => { throw new Error("not used"); },
+      getSubscription: async (id) => ({
+        id,
+        status: "APPROVAL_PENDING",
+        nextBillingAt: null,
+        lastPaymentAt: null,
+        lastPaymentCents: null,
+        approveUrl: "https://www.paypal.com/checkoutnow?token=pending",
+      }),
+      cancelSubscription: async () => {
+        throw new PayPalError("PayPal request failed (HTTP 404; RESOURCE_NOT_FOUND).", 404, "RESOURCE_NOT_FOUND");
+      },
+    };
+
+    await expect(cancelPendingFirmCheckout(h.db, admin, provider)).resolves.toBeUndefined();
+    expect(await getFirm(h.db, firmId)).toMatchObject({
+      paypalSubscriptionId: null,
+      paypalCheckoutRequestId: null,
+    });
   });
 
   it("reports the specific missing PayPal configuration to the subscription dashboard", async () => {

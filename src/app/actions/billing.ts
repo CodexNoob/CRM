@@ -52,6 +52,7 @@ export async function cancelFirmSubscriptionAction(_prev: ActionState, _formData
   try {
     await cancelFirmSubscription(getDb(), actor);
   } catch (error) {
+    revalidatePath("/staff", "layout");
     return errorState(error);
   }
   revalidatePath("/staff", "layout");

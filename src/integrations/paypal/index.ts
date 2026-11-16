@@ -137,10 +137,15 @@ async function call<T>(
   });
   const result: unknown = await response.json().catch(() => null);
   if (!response.ok || (!expectNoContent && (!result || typeof result !== "object"))) {
-    const issue = result && typeof result === "object" && typeof (result as { name?: unknown }).name === "string"
+    const rawIssue = result && typeof result === "object" && typeof (result as { name?: unknown }).name === "string"
       ? (result as { name: string }).name
       : undefined;
-    throw new PayPalError(`PayPal request failed (HTTP ${response.status}).`, response.status, issue);
+    const issue = rawIssue && /^[A-Z0-9_]{1,80}$/.test(rawIssue) ? rawIssue : undefined;
+    throw new PayPalError(
+      `PayPal request failed (HTTP ${response.status}${issue ? `; ${issue}` : ""}).`,
+      response.status,
+      issue,
+    );
   }
   if (expectNoContent) return;
   return result as T;

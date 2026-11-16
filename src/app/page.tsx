@@ -50,7 +50,7 @@ export async function generateMetadata(): Promise<Metadata> {
 const faqs: [string, string][] = [
   ["Do I need a credit card for the free trial?", `No. Your ${product.trialDays}-day trial starts as soon as you sign up. Subscribe from inside the CRM whenever you’re ready.`],
   ["What happens when the trial ends?", "If you haven’t subscribed, your workspace pauses until you do. Nothing is deleted, and your clients can still reach their portal."],
-  ["How do payments work?", "Subscription invoices are issued through QuickBooks Online. You pay the invoice in QuickBooks; this CRM does not store payment credentials."],
+  ["How do payments work?", "CRM subscriptions are billed through PayPal. Card details never reach this app; QuickBooks is an optional integration for a firm’s own client billing."],
   ["Is our data kept separate from other firms?", "Yes. Every firm has its own private workspace; staff and clients only ever see their own firm’s records."],
 ];
 
@@ -154,7 +154,7 @@ export default async function ProductHome() {
               })}
             </div>
             <p className="mt-6 flex items-center justify-center gap-2 text-center text-xs text-muted">
-              <LockIcon className="text-brand-ink" /> Prices in USD. Subscription invoices are issued through QuickBooks Online.
+              <LockIcon className="text-brand-ink" /> Prices in USD. CRM subscriptions are billed through PayPal; card details never reach this app.
             </p>
           </div>
         </section>

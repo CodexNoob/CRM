@@ -79,6 +79,9 @@ function requireCheckoutReady(provider: PayPalSubscriptionProvider) {
 
 function mapStatus(status: PayPalSubscriptionStatus): Firm["status"] | null {
   switch (status) {
+    case "APPROVAL_PENDING":
+    case "APPROVED":
+      return "trial";
     case "ACTIVE":
       return "active";
     case "SUSPENDED":
@@ -93,7 +96,14 @@ function mapStatus(status: PayPalSubscriptionStatus): Firm["status"] | null {
 
 function paypalFailure(action: string, error: unknown): IntegrationNotConfiguredError {
   const detail = error instanceof paypal.PayPalError ? ` ${error.message}` : "";
-  return new IntegrationNotConfiguredError("PayPal", `Could not ${action}.${detail}`);
+  const guidance = error instanceof paypal.PayPalError && error.status === 404 && action === "cancel the pending checkout"
+    ? " PayPal did not find the subscription for cancellation. Its pending checkout remains on file; verify it in the same PayPal Sandbox or Live account before retrying. Do not start another checkout until the pending one is resolved."
+    : "";
+  return new IntegrationNotConfiguredError("PayPal", `Could not ${action}.${detail}${guidance}`);
+}
+
+function isPayPalResourceMissing(error: unknown): boolean {
+  return error instanceof paypal.PayPalError && error.status === 404 && error.issue === "RESOURCE_NOT_FOUND";
 }
 
 async function planFor(db: Db, interval: PlanInterval, provider: PayPalSubscriptionProvider): Promise<string> {
@@ -311,6 +321,7 @@ export async function cancelFirmSubscription(
     return;
   }
   if (snapshot.status !== "ACTIVE" && snapshot.status !== "SUSPENDED") {
+    await syncFromSnapshot(db, firm, snapshot, now);
     throw new ValidationError({ _form: ["PayPal has not activated this subscription yet."] });
   }
   const paidThrough = snapshot.nextBillingAt ?? firm.nextBillingAt;
@@ -342,6 +353,18 @@ export async function cancelPendingFirmCheckout(
   try {
     snapshot = await provider.getSubscription(firm.paypalSubscriptionId);
   } catch (error) {
+    // If PayPal no longer recognizes this pending ID, it cannot be approved or charged.
+    // Clear only this exact stale reference so the admin can start a fresh checkout.
+    if (isPayPalResourceMissing(error)) {
+      await db.update(firms).set({
+        paypalSubscriptionId: null,
+        paypalCheckoutRequestId: null,
+        billingSyncedAt: now,
+        updatedAt: now,
+      }).where(and(eq(firms.id, firm.id), eq(firms.paypalSubscriptionId, firm.paypalSubscriptionId)));
+      await recordAudit(db, { firmId: firm.id, actorUserId: actor.userId, action: "billing.checkout_stale_cleared", entityType: "firm", entityId: firm.id });
+      return;
+    }
     throw paypalFailure("check the pending checkout", error);
   }
   if (snapshot.status === "ACTIVE" || snapshot.status === "SUSPENDED") {
@@ -351,7 +374,9 @@ export async function cancelPendingFirmCheckout(
     try {
       await provider.cancelSubscription(snapshot.id, "Checkout approval was cancelled");
     } catch (error) {
-      throw paypalFailure("cancel the pending checkout", error);
+      // Treat PayPal's not-found response as an already-removed pending checkout.
+      // The lookup above confirmed this was not an active or suspended subscription.
+      if (!isPayPalResourceMissing(error)) throw paypalFailure("cancel the pending checkout", error);
     }
   }
   await db.update(firms).set({

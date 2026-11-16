@@ -128,6 +128,7 @@ describe("PayPal configuration and webhooks", () => {
     vi.stubEnv("PAYPAL_ENVIRONMENT", "sandbox");
     vi.stubEnv("PAYPAL_WEBHOOK_ID", "sandbox-webhook-id");
     let verificationStatus = "SUCCESS";
+    let cancelError = false;
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
       if (url.pathname === "/v1/oauth2/token") return Response.json({ access_token: "access-token", expires_in: 3600 });
@@ -136,7 +137,11 @@ describe("PayPal configuration and webhooks", () => {
         expect(body.webhook_id).toBe("sandbox-webhook-id");
         return Response.json({ verification_status: verificationStatus });
       }
-      if (url.pathname === "/v1/billing/subscriptions/I-subscription/cancel") return new Response(null, { status: 204 });
+      if (url.pathname === "/v1/billing/subscriptions/I-subscription/cancel") {
+        return cancelError
+          ? Response.json({ name: "RESOURCE_NOT_FOUND" }, { status: 404 })
+          : new Response(null, { status: 204 });
+      }
       throw new Error(`Unexpected PayPal request: ${url.pathname}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -151,6 +156,12 @@ describe("PayPal configuration and webhooks", () => {
     };
     expect(await verifyWebhookSignature(headers, event)).toBe(true);
     await expect(cancelSubscription("I-subscription", "Test cancellation")).resolves.toBeUndefined();
+    cancelError = true;
+    await expect(cancelSubscription("I-subscription", "Test cancellation")).rejects.toMatchObject({
+      status: 404,
+      issue: "RESOURCE_NOT_FOUND",
+      message: "PayPal request failed (HTTP 404; RESOURCE_NOT_FOUND).",
+    });
 
     verificationStatus = "FAILURE";
     const request = new NextRequest("https://crm.example/api/webhooks/paypal", {
@@ -168,6 +179,6 @@ describe("PayPal configuration and webhooks", () => {
     const response = await POST(request);
     expect(response.status).toBe(401);
     expect(await response.json()).toMatchObject({ error: "Webhook signature verification failed." });
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
   });
 });

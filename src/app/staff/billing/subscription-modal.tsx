@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Check, X } from "lucide-react";
 import { logoutAction } from "@/app/actions/auth";
-import { cancelPendingFirmCheckoutAction, refreshFirmBillingAction } from "@/app/actions/billing";
+import { refreshFirmBillingAction } from "@/app/actions/billing";
 import { Alert, Badge } from "@/components/ui";
 import { product, PLAN_INTERVALS } from "@/content/product";
 import { CancelPendingCheckoutButton, CancelSubscriptionButton, CheckoutButton } from "./billing-controls";
@@ -44,7 +44,6 @@ export function SubscriptionModal({ summary }: { summary: SubscriptionSummary })
   const returned = params.get("subscribed");
   const open = summary.locked || requested;
   const [refreshing, startRefresh] = useTransition();
-  const [checkoutCancelError, setCheckoutCancelError] = useState<string | null>(null);
 
   useEffect(() => {
     const d = ref.current;
@@ -62,19 +61,6 @@ export function SubscriptionModal({ summary }: { summary: SubscriptionSummary })
       });
     }
   }, [returned, summary.paying, summary.approvalPending, router]);
-
-  useEffect(() => {
-    if (returned === "0" && summary.approvalPending) {
-      startRefresh(async () => {
-        const result = await cancelPendingFirmCheckoutAction();
-        if (result.status === "error") {
-          setCheckoutCancelError(result.message ?? "Contact support to clear the pending PayPal checkout.");
-          return;
-        }
-        router.refresh();
-      });
-    }
-  }, [returned, summary.approvalPending, router]);
 
   const close = () => {
     if (summary.locked) return;
@@ -125,13 +111,11 @@ export function SubscriptionModal({ summary }: { summary: SubscriptionSummary })
             <Alert tone="info">{refreshing ? "Checking PayPal…" : "PayPal is still confirming approval. Refresh shortly."}</Alert>
           )
         ) : returned === "0" ? (
-          checkoutCancelError ? (
-            <Alert tone="warning" title="PayPal checkout could not be cleared">{checkoutCancelError}</Alert>
-          ) : summary.approvalPending ? (
-            <Alert tone="info">{refreshing ? "Cancelling the pending PayPal checkout…" : "PayPal checkout was cancelled. No subscription was started."}</Alert>
-          ) : (
-            <Alert tone="info">PayPal checkout was cancelled. No subscription was started.</Alert>
-          )
+          <Alert tone="info">
+            PayPal approval was not completed. {summary.approvalPending
+              ? "Your pending checkout remains on file. Continue it or cancel it below."
+              : "Check your subscription status before trying again."}
+          </Alert>
         ) : null}
         {summary.reason ? <Alert tone={summary.locked ? "error" : "warning"}>{summary.reason}</Alert> : null}
 
@@ -153,7 +137,9 @@ export function SubscriptionModal({ summary }: { summary: SubscriptionSummary })
             </dd>
           </div>
           <div>
-            <dt className="text-[12px] text-muted">{summary.state === "trial" && !summary.approvalPending ? "Trial ends" : "Plan"}</dt>
+            <dt className="text-[12px] text-muted">
+              {summary.approvalPending ? "Pending plan" : summary.state === "trial" ? "Trial ends" : "Plan"}
+            </dt>
             <dd className="mt-1 font-medium">
               {summary.state === "trial" && !summary.approvalPending
                 ? `${day(summary.trialEndsAt)}${summary.trialDaysLeft ? ` (${summary.trialDaysLeft} days left)` : ""}`
