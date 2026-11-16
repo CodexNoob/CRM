@@ -2,7 +2,7 @@
 
 import { useActionState, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createInvoiceAction, createSubscriptionAction, invoiceRowAction, portalSubscribeAction, subscriptionRowAction } from "@/app/actions/invoices";
+import { createInvoiceAction, createSubscriptionAction, invoiceRowAction, subscriptionRowAction } from "@/app/actions/invoices";
 import { FormMessage, inputClass, SelectField, SubmitButton, textareaClass, TextField } from "@/components/form";
 import { Alert, buttonClass, cx } from "@/components/ui";
 import { idleState, type ActionState } from "@/lib/action-state";
@@ -13,10 +13,9 @@ function centsFrom(v: FormDataEntryValue | null): number {
   const s = typeof v === "string" ? v.replace(/[$,\s]/g, "") : "";
   return /^\d+(\.\d{1,2})?$/.test(s) ? Math.round(Number(s) * 100) : 0;
 }
-
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
-/** Staff form: creates the invoice in PayPal and emails it to the client. */
+/** Staff form: creates the invoice in QuickBooks and emails it to the client. */
 export function NewInvoiceForm({ clientId, clientEmail, engagements, firmId }: { clientId: string; clientEmail: string | null; engagements: { value: string; label: string }[]; firmId?: string }) {
   const [formKey, setFormKey] = useState(0);
   return <NewInvoiceFormBody key={formKey} clientId={clientId} clientEmail={clientEmail} engagements={engagements} firmId={firmId} onReset={() => setFormKey((k) => k + 1)} />;
@@ -24,6 +23,7 @@ export function NewInvoiceForm({ clientId, clientEmail, engagements, firmId }: {
 
 function NewInvoiceFormBody({ clientId, clientEmail, engagements, firmId, onReset }: { clientId: string; clientEmail: string | null; engagements: { value: string; label: string }[]; firmId?: string; onReset: () => void }) {
   const [state, action] = useActionState(createInvoiceAction.bind(null, clientId), idleState);
+  const [requestId] = useState(() => crypto.randomUUID());
   const [rows, setRows] = useState(() => Math.max(1, countRows(state)));
   const [total, setTotal] = useState(0);
   const formRef = useRef<HTMLFormElement>(null);
@@ -51,12 +51,13 @@ function NewInvoiceFormBody({ clientId, clientEmail, engagements, firmId, onRese
   }
 
   if (!clientEmail) {
-    return <Alert tone="warning">Add an email address to this client first. PayPal emails the invoice and payment link to that address.</Alert>;
+    return <Alert tone="warning">Add an email address to this client first. QuickBooks emails the invoice and payment link to that address.</Alert>;
   }
 
   return (
     <form ref={formRef} action={action} onInput={recalc} className="space-y-4" noValidate>
       {firmId ? <input type="hidden" name="firmId" value={firmId} /> : null}
+      <input type="hidden" name="requestId" value={requestId} />
       <FormMessage state={state} />
       {state.fieldErrors?._form ? <Alert tone="error">{state.fieldErrors._form.join(" ")}</Alert> : null}
       <div className="grid gap-3 sm:grid-cols-2">
@@ -93,9 +94,9 @@ function NewInvoiceFormBody({ clientId, clientEmail, engagements, firmId, onRese
       <div className="flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-[13px] text-muted">
           Total <span className="ml-1 text-[16px] font-semibold text-ink tabular">{usd.format(total / 100)}</span>
-          <span className="block text-[12px]">PayPal will email the invoice to {clientEmail}.</span>
+          <span className="block text-[12px]">QuickBooks will email the invoice to {clientEmail}.</span>
         </p>
-        <SubmitButton pendingText="Sending to PayPal…">Create and send invoice</SubmitButton>
+        <SubmitButton pendingText="Sending to QuickBooks…">Create and send invoice</SubmitButton>
       </div>
     </form>
   );
@@ -156,7 +157,7 @@ export function InvoiceRowActions({ id, clientId, status, canCancel, firmId }: {
   const [result, setResult] = useState<ActionState | null>(null);
 
   const run = (op: "send" | "refresh" | "cancel") => {
-    if (op === "cancel" && !window.confirm("Cancel this invoice? PayPal will tell the client it was cancelled, and it can no longer be paid.")) return;
+    if (op === "cancel" && !window.confirm("Void this QuickBooks invoice? It can no longer be paid.")) return;
     start(async () => {
       const r = await invoiceRowAction(id, clientId, op, firmId);
       setResult(r);
@@ -195,7 +196,7 @@ export function InvoiceRowActions({ id, clientId, status, canCancel, firmId }: {
 
 /* ───────── Subscriptions ───────── */
 
-/** Staff form: sets up a monthly or yearly plan the client can subscribe to from the portal. */
+/** Staff form: sets up a recurring schedule of QuickBooks invoices. */
 export function NewSubscriptionForm({ clientId, clientEmail, firmId }: { clientId: string; clientEmail: string | null; firmId?: string }) {
   const [formKey, setFormKey] = useState(0);
   return <NewSubscriptionFormBody key={formKey} clientId={clientId} clientEmail={clientEmail} firmId={firmId} onReset={() => setFormKey((k) => k + 1)} />;
@@ -234,8 +235,8 @@ function NewSubscriptionFormBody({ clientId, clientEmail, firmId, onReset }: { c
           ]}
         />
       </div>
-      <p className="text-[12px] text-muted">The client gets a Subscribe button in their portal. Once they approve it in PayPal, they’re charged automatically each period until it’s cancelled.</p>
-      <SubmitButton pendingText="Creating in PayPal…">Create subscription</SubmitButton>
+      <p className="text-[12px] text-muted">QuickBooks invoices will be sent on the selected schedule. This does not authorize automatic card charges.</p>
+      <SubmitButton pendingText="Creating schedule…">Create invoice schedule</SubmitButton>
     </form>
   );
 }
@@ -273,22 +274,5 @@ export function SubscriptionRowActions({ id, clientId, status, canCancel, firmId
         </p>
       ) : null}
     </div>
-  );
-}
-
-/** Portal: the client's Subscribe button. Redirects to PayPal to approve. */
-export function SubscribeButton({ id, label }: { id: string; label: string }) {
-  const [state, action] = useActionState(portalSubscribeAction.bind(null, id), idleState);
-  return (
-    <form action={action} className="flex flex-col items-stretch gap-1 sm:items-end">
-      <SubmitButton pendingText="Opening PayPal…" className="min-h-10 px-4">
-        Subscribe<span className="sr-only"> to {label}</span>
-      </SubmitButton>
-      {state.status === "error" ? (
-        <p role="alert" className="max-w-xs text-[12px] text-danger-ink sm:text-right">
-          {state.fieldErrors?._form?.join(" ") ?? state.message}
-        </p>
-      ) : null}
-    </form>
   );
 }

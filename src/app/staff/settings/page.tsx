@@ -72,7 +72,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <li>Organization name used for client subscription checkout branding</li>
             </ul>
             <p className="mt-4 border-t border-line pt-3 text-xs leading-5 text-muted">
-              PayPal invoices currently use the platform’s connected PayPal account. This profile does not change merchant identity or payment settlement; per-firm PayPal accounts are not implemented.
+              This profile controls the firm identity shown in its workspace and client portal. QuickBooks invoices are issued through the firm’s own company connection and are not changed by profile contact details.
             </p>
           </Panel>
         </div>

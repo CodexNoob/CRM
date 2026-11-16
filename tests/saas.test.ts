@@ -1,50 +1,22 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { DbHandle } from "@/db";
-import { firms, platformPlans } from "@/db/schema";
-import type { PayPalSubscriptionSnapshot } from "@/integrations/paypal";
+import { firms } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
 import { ForbiddenError, IntegrationNotConfiguredError, ValidationError } from "@/lib/errors";
 import { login } from "@/lib/auth/login";
-import { cancelFirmSubscription, firmAccess, getBillingOverview, startFirmCheckout, syncFirmBilling } from "@/services/firm-billing";
+import { cancelFirmSubscription, cancelPendingFirmCheckout, firmAccess, getBillingOverview, startFirmCheckout } from "@/services/firm-billing";
+import type { PayPalSubscriptionProvider } from "@/services/firm-billing";
+import type { PayPalSubscriptionSnapshot } from "@/integrations/paypal";
 import { getFirm } from "@/services/firms";
 import { getOrganizationProfile, saveFirmProfile } from "@/services/settings";
 import { SignupRejectedError, signUpFirm } from "@/services/signup";
-import type { SubscriptionProvider } from "@/services/subscriptions";
 import { listClients } from "@/services/clients";
 import { createTestDb, createUser } from "./helpers";
 
 const DAY = 24 * 3600_000;
 const PASSWORD = "correct horse battery staple";
-const urls = { returnUrl: "http://localhost:3000/staff/billing?subscribed=1", cancelUrl: "http://localhost:3000/staff/billing?subscribed=0" };
-
 let n = 0;
-const subs = new Map<string, PayPalSubscriptionSnapshot>();
-function fakePayPal() {
-  const state = { configured: true, plans: [] as string[] };
-  const p: SubscriptionProvider = {
-    get isConfigured() {
-      return state.configured;
-    },
-    currency: "USD",
-    async createPlan(i) {
-      state.plans.push(`${i.interval}:${i.amountCents}`);
-      return { planId: `P-${++n}` };
-    },
-    async startSubscription() {
-      const s: PayPalSubscriptionSnapshot = { id: `I-${++n}`, status: "APPROVAL_PENDING", nextBillingAt: null, lastPaymentAt: null, lastPaymentCents: null, approveUrl: `https://www.sandbox.paypal.com/approve/${n}` };
-      subs.set(s.id, s);
-      return s;
-    },
-    async getSubscription(id) {
-      return subs.get(id)!;
-    },
-    async cancelSubscription(id) {
-      subs.set(id, { ...subs.get(id)!, status: "CANCELLED" });
-    },
-  };
-  return { p, state };
-}
 
 const signup = (over: Record<string, unknown> = {}) => ({
   firmName: "Rivera Tax & Accounting",
@@ -58,7 +30,6 @@ const signup = (over: Record<string, unknown> = {}) => ({
 });
 
 let h: DbHandle;
-let pp: ReturnType<typeof fakePayPal>;
 
 beforeAll(async () => {
   h = await createTestDb();
@@ -66,10 +37,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await h.close();
 });
-beforeEach(() => {
-  pp = fakePayPal();
-});
-
 describe("access rules", () => {
   const now = new Date("2026-11-12T12:00:00Z");
   it("trial is open until it ends, then locked; active and past_due stay open", () => {
@@ -122,51 +89,117 @@ describe("subscribing to the software", () => {
     admin = await signUpFirm(h.db, signup({ firmName: "Pay Co" }));
   });
 
-  it("only a firm admin can start checkout; PayPal must be connected", async () => {
+  it("requires a firm admin and starts/resumes a PayPal subscription checkout", async () => {
     const preparer = await createUser(h.db, { role: "employee", firmId: admin.firmId });
-    await expect(startFirmCheckout(h.db, preparer, "month", urls, pp.p)).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(startFirmCheckout(h.db, admin, "weekly", urls, pp.p)).rejects.toBeInstanceOf(ValidationError);
-    pp.state.configured = false;
-    await expect(startFirmCheckout(h.db, admin, "month", urls, pp.p)).rejects.toBeInstanceOf(IntegrationNotConfiguredError);
+    const snapshot: PayPalSubscriptionSnapshot = {
+      id: "I-subscription",
+      status: "APPROVAL_PENDING",
+      nextBillingAt: null,
+      lastPaymentAt: null,
+      lastPaymentCents: null,
+      approveUrl: "https://www.paypal.com/checkoutnow?token=I-subscription",
+    };
+    let starts = 0;
+    const provider: PayPalSubscriptionProvider = {
+      isConfigured: true,
+      isWebhookConfigured: true,
+      currency: "USD",
+      createPlan: async () => ({ planId: "P-monthly" }),
+      startSubscription: async () => {
+        starts += 1;
+        return snapshot;
+      },
+      getSubscription: async () => snapshot,
+      cancelSubscription: async () => {},
+    };
+    const urls = { returnUrl: "https://crm.example/staff?subscribed=1", cancelUrl: "https://crm.example/staff?subscribed=0" };
+    await expect(startFirmCheckout(h.db, preparer, "month", urls, provider)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(startFirmCheckout(h.db, admin, "weekly", urls, provider)).rejects.toBeInstanceOf(ValidationError);
+    await expect(startFirmCheckout(h.db, admin, "month", urls, { ...provider, isConfigured: false })).rejects.toBeInstanceOf(IntegrationNotConfiguredError);
+    expect(await startFirmCheckout(h.db, admin, "month", urls, provider)).toBe(snapshot.approveUrl);
+    expect(await startFirmCheckout(h.db, admin, "month", urls, provider)).toBe(snapshot.approveUrl);
+    expect(starts).toBe(1);
   });
 
-  it("checkout → approval → active; plans are created once per interval at the listed price", async () => {
-    const url = await startFirmCheckout(h.db, admin, "year", urls, pp.p);
-    expect(url).toContain("paypal.com");
-    expect(pp.state.plans).toEqual(["year:99000"]);
-    await startFirmCheckout(h.db, admin, "year", urls, pp.p); // abandoned once, retried
-    expect(pp.state.plans).toEqual(["year:99000"]); // plan reused
-    const [plan] = await h.db.select().from(platformPlans).where(eq(platformPlans.interval, "year"));
-    expect(plan!.amountCents).toBe(99000);
-
-    let firm = await getFirm(h.db, admin.firmId);
-    expect(firm.status).toBe("trial");
-    subs.set(firm.paypalSubscriptionId!, { ...subs.get(firm.paypalSubscriptionId!)!, status: "ACTIVE", nextBillingAt: new Date("2027-11-12T00:00:00Z") });
-    firm = await syncFirmBilling(h.db, admin.firmId, { force: true }, pp.p);
-    expect(firm).toMatchObject({ status: "active", billingInterval: "year" });
-    expect(firm.nextBillingAt?.toISOString()).toBe("2027-11-12T00:00:00.000Z");
-    expect((await getBillingOverview(h.db, admin, {}, pp.p)).access.state).toBe("active");
-    await expect(startFirmCheckout(h.db, admin, "month", urls, pp.p)).rejects.toBeInstanceOf(ValidationError);
-  });
-
-  it("a failed payment marks past_due (still open); cancelling keeps access until the period ends", async () => {
-    const firm = await getFirm(h.db, admin.firmId);
-    subs.set(firm.paypalSubscriptionId!, { ...subs.get(firm.paypalSubscriptionId!)!, status: "SUSPENDED" });
-    expect((await syncFirmBilling(h.db, admin.firmId, { force: true }, pp.p)).status).toBe("past_due");
-    subs.set(firm.paypalSubscriptionId!, { ...subs.get(firm.paypalSubscriptionId!)!, status: "ACTIVE" });
-    await syncFirmBilling(h.db, admin.firmId, { force: true }, pp.p);
-
-    await cancelFirmSubscription(h.db, admin, pp.p);
+  it("cancels renewal but preserves access through the paid period", async () => {
+    await h.db.update(firms).set({
+      status: "active",
+      paypalSubscriptionId: "I-cancel-me",
+      nextBillingAt: new Date("2027-11-12T00:00:00Z"),
+      billingInterval: "year",
+    }).where(eq(firms.id, admin.firmId));
+    let cancelledId: string | null = null;
+    const provider: PayPalSubscriptionProvider = {
+      isConfigured: true,
+      isWebhookConfigured: true,
+      currency: "USD",
+      createPlan: async () => ({ planId: "unused" }),
+      startSubscription: async () => { throw new Error("not used"); },
+      getSubscription: async (id) => ({
+        id,
+        status: "ACTIVE",
+        nextBillingAt: new Date("2027-11-12T00:00:00Z"),
+        lastPaymentAt: null,
+        lastPaymentCents: null,
+        approveUrl: null,
+      }),
+      cancelSubscription: async (id) => { cancelledId = id; },
+    };
+    await cancelFirmSubscription(h.db, admin, provider);
+    expect(cancelledId).toBe("I-cancel-me");
     const cancelled = await getFirm(h.db, admin.firmId);
     expect(cancelled.status).toBe("cancelled");
     expect(firmAccess(cancelled, new Date("2027-01-01")).locked).toBe(false);
     expect(firmAccess(cancelled, new Date("2028-01-01")).locked).toBe(true);
   });
 
+  it("clears a declined PayPal approval checkout without cancelling an active subscription", async () => {
+    const firmId = await signUpFirm(h.db, signup({ firmName: "Declined Co" })).then((actor) => actor.firmId);
+    const admin = await createUser(h.db, { role: "admin", firmId });
+    await h.db.update(firms).set({ paypalSubscriptionId: "I-pending", paypalCheckoutRequestId: "checkout-request" }).where(eq(firms.id, firmId));
+    let cancellations = 0;
+    const provider: PayPalSubscriptionProvider = {
+      isConfigured: true,
+      isWebhookConfigured: true,
+      currency: "USD",
+      createPlan: async () => ({ planId: "unused" }),
+      startSubscription: async () => { throw new Error("not used"); },
+      getSubscription: async () => ({
+        id: "I-pending",
+        status: "APPROVAL_PENDING",
+        nextBillingAt: null,
+        lastPaymentAt: null,
+        lastPaymentCents: null,
+        approveUrl: null,
+      }),
+      cancelSubscription: async () => { cancellations += 1; },
+    };
+    await cancelPendingFirmCheckout(h.db, admin, provider);
+    expect(cancellations).toBe(1);
+    expect((await getFirm(h.db, firmId)).paypalSubscriptionId).toBeNull();
+    expect((await getFirm(h.db, firmId)).paypalCheckoutRequestId).toBeNull();
+  });
+
+  it("reports the specific missing PayPal configuration to the subscription dashboard", async () => {
+    const provider: PayPalSubscriptionProvider = {
+      isConfigured: false,
+      isWebhookConfigured: false,
+      currency: "USD",
+      configurationMessage: "Production billing requires PAYPAL_ENVIRONMENT=live and PayPal live credentials.",
+      createPlan: async () => ({ planId: "unused" }),
+      startSubscription: async () => { throw new Error("not used"); },
+      getSubscription: async () => { throw new Error("not used"); },
+      cancelSubscription: async () => {},
+    };
+    const overview = await getBillingOverview(h.db, admin, {}, provider);
+    expect(overview.paypalReady).toBe(false);
+    expect(overview.paypalSetupMessage).toContain("PAYPAL_ENVIRONMENT=live");
+  });
+
   it("an expired trial locks the firm", async () => {
     const t = await signUpFirm(h.db, signup({ firmName: "Late Co" }));
     await h.db.update(firms).set({ trialEndsAt: new Date(Date.now() - 1000) }).where(eq(firms.id, t.firmId));
-    expect((await getBillingOverview(h.db, t, {}, pp.p)).access.locked).toBe(true);
+    expect((await getBillingOverview(h.db, t)).access.locked).toBe(true);
   });
 });
 

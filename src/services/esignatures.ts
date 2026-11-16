@@ -93,6 +93,7 @@ export interface SignatureRequestRow {
   sentAt: Date | null;
   expiresAt: Date | null;
   completedAt: Date | null;
+  failureReason: string | null;
   signerCount: number;
   signedCount: number;
 }
@@ -114,6 +115,7 @@ export async function listSignatureRequests(db: Db, actor: Actor, f: { status?: 
       sentAt: signatureRequests.sentAt,
       expiresAt: signatureRequests.expiresAt,
       completedAt: signatureRequests.completedAt,
+      failureReason: signatureRequests.failureReason,
       signerCount: sql<number>`(select count(*)::int from ${signatureSigners} s where s.signature_request_id = ${signatureRequests.id} and s.firm_id = ${signatureRequests.firmId})`,
       signedCount: sql<number>`(select count(*)::int from ${signatureSigners} s where s.signature_request_id = ${signatureRequests.id} and s.firm_id = ${signatureRequests.firmId} and s.status = 'signed')`,
     })
@@ -263,7 +265,14 @@ export async function sendSignatureRequest(db: Db, actor: Actor, id: string, dep
       clientId: provider.embedded ? dropboxClientId() : undefined,
     });
   } catch (error) {
-    const reason = (error as Error)?.message?.slice(0, 300) ?? "Provider error";
+    let reason = error instanceof Error ? error.message : "Provider error";
+    const apiKey = process.env.DROPBOX_SIGN_API_KEY?.trim();
+    if (apiKey) {
+      reason = reason
+        .replaceAll(apiKey, "[redacted]")
+        .replaceAll(Buffer.from(`${apiKey}:`).toString("base64"), "[redacted]");
+    }
+    reason = reason.slice(0, 300) || "Provider error";
     await db.update(signatureRequests).set({ status: "failed", failureReason: reason, updatedAt: new Date() }).where(and(eq(signatureRequests.id, id), inFirm(signatureRequests.firmId, actor)));
     throw new AppError(`Dropbox Sign couldn’t send the request: ${reason}`);
   }
@@ -306,7 +315,14 @@ export async function voidSignatureRequest(db: Db, actor: Actor, id: string, dep
     try {
       await prov(deps).cancel(req.providerRequestId);
     } catch (error) {
-      throw new AppError(`Dropbox Sign couldn’t cancel the request: ${(error as Error)?.message?.slice(0, 200) ?? "provider error"}`);
+      let reason = error instanceof Error ? error.message : "Provider error";
+      const apiKey = process.env.DROPBOX_SIGN_API_KEY?.trim();
+      if (apiKey) {
+        reason = reason
+          .replaceAll(apiKey, "[redacted]")
+          .replaceAll(Buffer.from(`${apiKey}:`).toString("base64"), "[redacted]");
+      }
+      throw new AppError(`Dropbox Sign couldn’t cancel the request: ${reason.slice(0, 200) || "Provider error"}`);
     }
     await db.update(signatureRequests).set({ status: "voided", updatedAt: new Date() }).where(and(eq(signatureRequests.id, id), inFirm(signatureRequests.firmId, actor)));
   }
@@ -329,7 +345,8 @@ interface WebhookPayload {
 
 /**
  * Handles one Dropbox Sign callback. Order: parse → verify hash (else 401) → record the event
- * once (duplicate → acknowledge, no changes) → apply. Unknown requests are recorded, nothing changes.
+ * once → apply. Duplicate callbacks reapply idempotent state changes but not activity entries.
+ * Unknown requests are recorded, nothing changes.
  */
 export async function processDropboxSignWebhook(db: Db, rawJson: string, deps: SignatureDeps = {}): Promise<WebhookResult> {
   const provider = prov(deps);
@@ -363,7 +380,10 @@ export async function processDropboxSignWebhook(db: Db, rawJson: string, deps: S
     })
     .onConflictDoNothing()
     .returning({ id: signatureEvents.id });
-  if (!inserted.length) return { status: 200, outcome: "duplicate" };
+  if (!inserted.length) {
+    if (req) await applyEvent(db, req, type, ev.event_metadata?.related_signature_id ?? null, occurredAt ?? new Date(), deps, false);
+    return { status: 200, outcome: "duplicate" };
+  }
   if (!req || type === "callback_test") return { status: 200, outcome: "ignored" };
 
   await applyEvent(db, req, type, ev.event_metadata?.related_signature_id ?? null, occurredAt ?? new Date(), deps);
@@ -372,7 +392,7 @@ export async function processDropboxSignWebhook(db: Db, rawJson: string, deps: S
 
 type RequestRow = typeof signatureRequests.$inferSelect;
 
-async function applyEvent(db: Db, req: RequestRow, type: string, signatureId: string | null, when: Date, deps: SignatureDeps) {
+async function applyEvent(db: Db, req: RequestRow, type: string, signatureId: string | null, when: Date, deps: SignatureDeps, recordActivity = true) {
   const firm = { firmId: req.firmId, userId: null };
   const setReq = (patch: Partial<RequestRow>) => db.update(signatureRequests).set({ ...patch, updatedAt: new Date() }).where(eq(signatureRequests.id, req.id));
   const signerWhere = signatureId ? and(eq(signatureSigners.signatureRequestId, req.id), eq(signatureSigners.providerSignerId, signatureId)) : undefined;
@@ -388,7 +408,9 @@ async function applyEvent(db: Db, req: RequestRow, type: string, signatureId: st
       await setReq({ status: "partially_signed" });
       break;
     case "signature_request_all_signed":
-      await completeRequest(db, req, when, deps);
+      if (!(await completeRequest(db, req, when, deps))) {
+        throw new AppError("Dropbox Sign has not confirmed that all signers have completed yet.");
+      }
       return;
     case "signature_request_declined":
       if (signerWhere) await db.update(signatureSigners).set({ status: "declined", declinedAt: when, updatedAt: new Date() }).where(signerWhere);
@@ -407,16 +429,19 @@ async function applyEvent(db: Db, req: RequestRow, type: string, signatureId: st
     default:
       return;
   }
-  await logActivity(db, firm, { entityType: req.engagementId ? "engagement" : "client", entityId: req.engagementId ?? req.clientId, clientId: req.clientId, type: "system", body: `Signature request “${req.title}”: ${type.replace(/^signature_request_/, "").replace(/_/g, " ")}` });
+  if (recordActivity) {
+    await logActivity(db, firm, { entityType: req.engagementId ? "engagement" : "client", entityId: req.engagementId ?? req.clientId, clientId: req.clientId, type: "system", body: `Signature request “${req.title}”: ${type.replace(/^signature_request_/, "").replace(/_/g, " ")}` });
+  }
 }
 
 /** Confirms completion with the provider, then stores the signed PDF as a client document linked to the engagement. */
-async function completeRequest(db: Db, req: RequestRow, when: Date, deps: SignatureDeps) {
-  if (req.status === "signed" && req.signedDocumentId) return;
+async function completeRequest(db: Db, req: RequestRow, when: Date, deps: SignatureDeps): Promise<boolean> {
+  if (req.status === "signed" && req.signedDocumentId) return true;
+  if (!req.providerRequestId) throw new AppError("Dropbox Sign did not provide a request reference for this signature.");
   const provider = prov(deps);
-  const status = await provider.getStatus(req.providerRequestId!);
-  if (!status.isComplete) return; // the event alone is not trusted for completion
-  const pdf = await provider.downloadSignedPdf(req.providerRequestId!);
+  const status = await provider.getStatus(req.providerRequestId);
+  if (!status.isComplete) return false; // the event alone is not trusted for completion
+  const pdf = await provider.downloadSignedPdf(req.providerRequestId);
   if (pdf.subarray(0, 5).toString("latin1") !== "%PDF-") throw new AppError("The signed file from Dropbox Sign wasn’t a PDF.");
 
   const storage = deps.storage ?? defaultStorage(db);
@@ -465,6 +490,7 @@ async function completeRequest(db: Db, req: RequestRow, when: Date, deps: Signat
       metadata: { signatureRequestId: req.id, documentId: doc!.id },
     });
   });
+  return true;
 }
 
 /* ───────── Client portal ───────── */

@@ -18,7 +18,7 @@ export const getCurrentActor = cache(async (): Promise<Actor | null> => {
   return validateSessionToken(getDb(), token);
 });
 
-/** The signed-in staff member's firm access (trial / active / locked), refreshed from PayPal at most every few minutes. */
+/** The signed-in staff member's firm access (trial / active / locked), refreshed from PayPal periodically. */
 export const getCurrentFirmAccess = cache(async (firmId: string): Promise<FirmAccess> => {
   const firm = await syncFirmBilling(getDb(), firmId);
   return firmAccess(firm);

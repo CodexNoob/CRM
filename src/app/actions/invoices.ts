@@ -1,16 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { getDb } from "@/db";
 import { errorState, formValues, type ActionState } from "@/lib/action-state";
 import { requireStaffActor } from "@/lib/auth/current";
 import { resolveFirmContext } from "@/services/firms";
-import { requirePortalContext } from "@/lib/auth/portal-context";
 import { formatMoney } from "@/lib/labels";
 import { cancelInvoice, createInvoice, refreshInvoice, sendInvoice } from "@/services/invoices";
-import { getOrganizationProfile } from "@/services/settings";
-import { cancelSubscription, createSubscriptionPlan, refreshSubscription, startPortalSubscription } from "@/services/subscriptions";
+import { cancelSubscription, createSubscriptionPlan, refreshSubscription } from "@/services/subscriptions";
 
 function revalidateInvoices(clientId: string) {
   revalidatePath(`/staff/clients/${clientId}`);
@@ -25,7 +22,7 @@ export async function createInvoiceAction(clientId: string, _prev: ActionState, 
   try {
     actor = await resolveFirmContext(getDb(), signedInActor, String(formData.get("firmId") ?? ""));
     const inv = await createInvoice(getDb(), actor, clientId, formValues(formData));
-    message = `Invoice ${inv.paypalInvoiceNumber ?? ""} for ${formatMoney(inv.totalCents, inv.currency)} was sent to ${inv.recipientEmail}.`.replace("  ", " ");
+    message = `Invoice ${inv.qboInvoiceNumber ?? ""} for ${formatMoney(inv.totalCents, inv.currency)} was sent to ${inv.recipientEmail}.`.replace("  ", " ");
   } catch (error) {
     revalidateInvoices(clientId); // a draft may have been saved even if sending failed
     return errorState(error, formData);
@@ -48,7 +45,7 @@ export async function invoiceRowAction(id: string, clientId: string, op: "send" 
   } finally {
     revalidateInvoices(clientId);
   }
-  const messages = { send: "Invoice sent.", refresh: "Status updated from PayPal.", cancel: "Invoice cancelled. PayPal has notified the client." };
+  const messages = { send: "Invoice sent through QuickBooks.", refresh: "Status updated from QuickBooks.", cancel: "Invoice voided in QuickBooks." };
   return { status: "success", message: messages[op] };
 }
 
@@ -61,7 +58,7 @@ export async function createSubscriptionAction(clientId: string, _prev: ActionSt
   try {
     actor = await resolveFirmContext(getDb(), signedInActor, String(formData.get("firmId") ?? ""));
     const sub = await createSubscriptionPlan(getDb(), actor, clientId, formValues(formData));
-    message = `Subscription "${sub.name}" (${formatMoney(sub.amountCents, sub.currency)} per ${sub.interval}) is ready. The client will see a Subscribe button in their portal.`;
+    message = `Recurring invoice schedule "${sub.name}" (${formatMoney(sub.amountCents, sub.currency)} per ${sub.interval}) is active. The first invoice is due now.`;
   } catch (error) {
     return errorState(error, formData);
   }
@@ -80,26 +77,5 @@ export async function subscriptionRowAction(id: string, clientId: string, op: "r
   } finally {
     revalidateInvoices(clientId);
   }
-  return { status: "success", message: op === "refresh" ? "Status updated from PayPal." : "Subscription cancelled. No further payments will be taken." };
-}
-
-/** Portal "Subscribe" button: sends the client to PayPal to approve the subscription. */
-export async function portalSubscribeAction(id: string, _prev: ActionState, _formData: FormData): Promise<ActionState> {
-  // The client being viewed is resolved on the server from portal_client_access.
-  const ctx = await requirePortalContext();
-  const actor = { ...ctx.actor, clientId: ctx.client.clientId };
-  let approveUrl: string;
-  try {
-    const db = getDb();
-    const profile = await getOrganizationProfile(db, actor.firmId);
-    const base = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
-    approveUrl = await startPortalSubscription(db, actor, id, {
-      returnUrl: `${base}/portal/invoices?subscribed=1`,
-      cancelUrl: `${base}/portal/invoices?subscribed=0`,
-      brandName: profile.name,
-    });
-  } catch (error) {
-    return errorState(error);
-  }
-  redirect(approveUrl);
+  return { status: "success", message: op === "refresh" ? "Schedule status checked." : "Recurring invoice schedule cancelled. Already-issued invoices remain payable in QuickBooks." };
 }

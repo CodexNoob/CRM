@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   customType,
   date,
   foreignKey,
@@ -121,6 +122,8 @@ const bytea = customType<{ data: Buffer; driverData: Buffer | Uint8Array }>({
 /* ───────────────────────── Tenancy ───────────────────────── */
 
 export const firmStatus = pgEnum("firm_status", ["trial", "active", "past_due", "cancelled"]);
+export const qboConnectionScope = pgEnum("qbo_connection_scope", ["firm"]);
+export const qboConnectionStatus = pgEnum("qbo_connection_status", ["connected", "reauthorization_required"]);
 
 /**
  * A subscribing firm (tenant). EVERY firm-owned row carries `firm_id`, and every
@@ -137,25 +140,62 @@ export const firms = pgTable(
     slug: text("slug").notNull(),
     status: firmStatus("status").notNull().default("trial"),
     trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
-    /* The firm's subscription to this software (PayPal Subscriptions, paid to the operator). */
+    /* The firm's subscription to this software, billed by the platform operator. */
     billingInterval: text("billing_interval"), // "month" | "year"
     paypalSubscriptionId: text("paypal_subscription_id"),
-    /** When PayPal will next charge (active subscriptions). */
+    paypalCheckoutRequestId: text("paypal_checkout_request_id"),
+    legacyExternalSubscriptionId: text("legacy_external_subscription_id"),
     nextBillingAt: timestamp("next_billing_at", { withTimezone: true }),
     billingSyncedAt: timestamp("billing_synced_at", { withTimezone: true }),
+    paypalLastEventAt: timestamp("paypal_last_event_at", { withTimezone: true }),
     ...timestamps,
   },
-  (t) => [uniqueIndex("firms_slug_unique").on(t.slug), uniqueIndex("firms_paypal_subscription_unique").on(t.paypalSubscriptionId)],
+  (t) => [
+    uniqueIndex("firms_slug_unique").on(t.slug),
+    uniqueIndex("firms_paypal_subscription_unique").on(t.paypalSubscriptionId),
+    uniqueIndex("firms_paypal_checkout_request_unique").on(t.paypalCheckoutRequestId),
+    uniqueIndex("firms_legacy_subscription_unique").on(t.legacyExternalSubscriptionId),
+  ],
 ).enableRLS();
 
-/** The operator's PayPal plans for selling this software (one per billing interval), created on first use. */
-export const platformPlans = pgTable("platform_plans", {
-  interval: text("interval").primaryKey(), // "month" | "year"
-  amountCents: integer("amount_cents").notNull(),
-  currency: text("currency").notNull(),
-  paypalPlanId: text("paypal_plan_id").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}).enableRLS();
+export const qboConnections = pgTable(
+  "qbo_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    scope: qboConnectionScope("scope").notNull(),
+    firmId: uuid("firm_id").notNull().references(() => firms.id, { onDelete: "cascade" }),
+    realmId: text("realm_id").notNull(),
+    companyName: text("company_name").notNull(),
+    accessTokenEncrypted: text("access_token_encrypted").notNull(),
+    refreshTokenEncrypted: text("refresh_token_encrypted").notNull(),
+    accessExpiresAt: timestamp("access_expires_at", { withTimezone: true }).notNull(),
+    refreshExpiresAt: timestamp("refresh_expires_at", { withTimezone: true }).notNull(),
+    status: qboConnectionStatus("status").notNull().default("connected"),
+    defaultItemId: text("default_item_id"),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    connectedById: uuid("connected_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("qbo_connections_firm_unique").on(t.firmId),
+    check("qbo_connections_scope_firm_check", sql`${t.scope} = 'firm'`),
+  ],
+).enableRLS();
+
+export const qboOAuthStates = pgTable(
+  "qbo_oauth_states",
+  {
+    stateHash: text("state_hash").primaryKey(),
+    scope: qboConnectionScope("scope").notNull(),
+    firmId: uuid("firm_id").notNull().references(() => firms.id, { onDelete: "cascade" }),
+    createdById: uuid("created_by_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check("qbo_oauth_states_scope_firm_check", sql`${t.scope} = 'firm'`),
+  ],
+).enableRLS();
 
 /** Singleton platform-owned identity; never tied to a subscribing firm's tenant record. */
 export const platformSettings = pgTable("platform_settings", {
@@ -738,15 +778,11 @@ export const announcements = pgTable(
   (t) => [index("announcements_published_idx").on(t.isPublished, t.publishedOn), index("announcements_firm_idx").on(t.firmId)],
 ).enableRLS();
 
-/* ───────────────────────── Invoices (PayPal is the system of record) ───────────────────────── */
+/* ───────────────────────── QuickBooks billing records ───────────────────────── */
 
 export const invoiceStatus = pgEnum("invoice_status", ["draft", "sent", "partially_paid", "paid", "cancelled", "refunded"]);
 
-/**
- * The CRM's linked copy of an invoice that lives in PayPal. PayPal emails it,
- * hosts the payment page and holds the payment records; status is refreshed from PayPal.
- * Amounts are integer cents. No card or bank data is ever stored here.
- */
+/** The CRM's linked copy of a QuickBooks invoice. No card or bank data is stored here. */
 export const invoices = pgTable(
   "invoices",
   {
@@ -766,9 +802,13 @@ export const invoices = pgTable(
     status: invoiceStatus("status").notNull().default("draft"),
     /** Email the invoice was sent to (snapshot of the client's email at send time). */
     recipientEmail: text("recipient_email").notNull(),
-    paypalInvoiceId: text("paypal_invoice_id"),
-    paypalInvoiceNumber: text("paypal_invoice_number"),
-    /** PayPal-hosted page where the client pays. */
+    qboInvoiceId: text("qbo_invoice_id"),
+    qboInvoiceNumber: text("qbo_invoice_number"),
+    qboRequestId: text("qbo_request_id"),
+    /** Old records remain visible but are never payable or synchronized by this app. */
+    legacyBilling: boolean("legacy_billing").notNull().default(false),
+    subscriptionId: uuid("subscription_id"),
+    billingPeriodStart: date("billing_period_start", { mode: "string" }),
     payUrl: text("pay_url"),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     paidAt: timestamp("paid_at", { withTimezone: true }),
@@ -779,7 +819,9 @@ export const invoices = pgTable(
   (t) => [
     index("invoices_client_idx").on(t.clientId, t.createdAt),
     index("invoices_status_idx").on(t.status),
-    uniqueIndex("invoices_paypal_id_unique").on(t.paypalInvoiceId),
+    uniqueIndex("invoices_qbo_id_unique").on(t.firmId, t.qboInvoiceId),
+    uniqueIndex("invoices_qbo_request_unique").on(t.qboRequestId),
+    uniqueIndex("invoices_subscription_period_unique").on(t.subscriptionId, t.billingPeriodStart).where(sql`${t.subscriptionId} IS NOT NULL`),
     index("invoices_firm_idx").on(t.firmId),
     foreignKey({ name: "invoices_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
     foreignKey({ name: "invoices_firm_engagement_fk", columns: [t.firmId, t.engagementId], foreignColumns: [engagements.firmId, engagements.id] }),
@@ -789,11 +831,16 @@ export const invoices = pgTable(
 export const subscriptionStatus = pgEnum("subscription_status", ["pending", "active", "suspended", "cancelled", "expired"]);
 export const billingInterval = pgEnum("billing_interval", ["month", "year"]);
 
-/**
- * Recurring billing (monthly or yearly) through PayPal Subscriptions.
- * Staff create the plan; the client clicks "Subscribe" in the portal and approves it in PayPal,
- * which then charges automatically each period. PayPal holds the payment method.
- */
+/** PayPal plans for the CRM subscription product, keyed by billing interval. */
+export const platformPlans = pgTable("platform_plans", {
+  interval: text("interval").primaryKey(),
+  amountCents: integer("amount_cents").notNull(),
+  currency: text("currency").notNull(),
+  paypalPlanId: text("paypal_plan_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}).enableRLS();
+
+/** A staff-managed schedule for recurring QuickBooks invoices; it never charges a card itself. */
 export const subscriptions = pgTable(
   "subscriptions",
   {
@@ -807,9 +854,9 @@ export const subscriptions = pgTable(
     currency: text("currency").notNull().default("USD"),
     interval: billingInterval("interval").notNull(),
     status: subscriptionStatus("status").notNull().default("pending"),
-    paypalPlanId: text("paypal_plan_id").notNull(),
-    /** Set when the client starts checkout; replaced if they abandon and start again. */
-    paypalSubscriptionId: text("paypal_subscription_id"),
+    legacyExternalPlanId: text("legacy_external_plan_id"),
+    legacyExternalSubscriptionId: text("legacy_external_subscription_id"),
+    legacyBilling: boolean("legacy_billing").notNull().default(false),
     nextBillingAt: timestamp("next_billing_at", { withTimezone: true }),
     lastPaymentAt: timestamp("last_payment_at", { withTimezone: true }),
     lastPaymentCents: integer("last_payment_cents"),
@@ -821,11 +868,67 @@ export const subscriptions = pgTable(
   },
   (t) => [
     index("subscriptions_client_idx").on(t.clientId, t.createdAt),
-    uniqueIndex("subscriptions_paypal_id_unique").on(t.paypalSubscriptionId),
+    uniqueIndex("subscriptions_legacy_external_id_unique").on(t.legacyExternalSubscriptionId),
     index("subscriptions_firm_idx").on(t.firmId),
     foreignKey({ name: "subscriptions_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
   ],
 ).enableRLS();
+
+/** Retained for reconciliation only; CRM subscription checkout now uses PayPal. */
+export const platformBillingInvoices = pgTable(
+  "platform_billing_invoices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    firmId: uuid("firm_id").notNull().references(() => firms.id, { onDelete: "restrict" }),
+    interval: billingInterval("interval").notNull(),
+    periodStart: date("period_start", { mode: "string" }).notNull(),
+    totalCents: integer("total_cents").notNull(),
+    currency: text("currency").notNull(),
+    dueDate: date("due_date", { mode: "string" }),
+    status: invoiceStatus("status").notNull().default("draft"),
+    qboInvoiceId: text("qbo_invoice_id"),
+    qboInvoiceNumber: text("qbo_invoice_number"),
+    qboRequestId: text("qbo_request_id").notNull(),
+    paymentUrl: text("payment_url"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    syncedAt: timestamp("synced_at", { withTimezone: true }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("platform_billing_firm_period_unique").on(t.firmId, t.periodStart),
+    uniqueIndex("platform_billing_qbo_id_unique").on(t.qboInvoiceId),
+    uniqueIndex("platform_billing_request_unique").on(t.qboRequestId),
+  ],
+).enableRLS();
+
+export const qboCustomerLinks = pgTable(
+  "qbo_customer_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    connectionId: uuid("connection_id").notNull().references(() => qboConnections.id, { onDelete: "cascade" }),
+    firmId: uuid("firm_id").notNull().references(() => firms.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+    qboCustomerId: text("qbo_customer_id").notNull(),
+    displayName: text("display_name").notNull(),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("qbo_customer_links_connection_customer_unique").on(t.connectionId, t.qboCustomerId),
+    uniqueIndex("qbo_customer_links_firm_client_unique").on(t.firmId, t.clientId),
+    foreignKey({ name: "qbo_customer_links_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+  ],
+).enableRLS();
+
+export const paypalWebhookEvents = pgTable("paypal_webhook_events", {
+  eventId: text("event_id").primaryKey(),
+  eventType: text("event_type").notNull(),
+  subscriptionId: text("subscription_id"),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }),
+  processedAt: timestamp("processed_at", { withTimezone: true }).notNull().defaultNow(),
+}).enableRLS();
 
 /* ───────────────────────── Practice workflow: contacts, onboarding, teams, templates, timeline ───────────────────────── */
 

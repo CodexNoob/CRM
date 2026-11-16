@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Briefcase, CalendarClock, CircleCheck, CreditCard, Mail, MessageSquare, Pencil, Phone, Plus, Receipt, Repeat } from "lucide-react";
+import { Briefcase, CalendarClock, CircleCheck, Mail, MessageSquare, Pencil, Phone, Plus, Receipt, Repeat } from "lucide-react";
 import { getDb } from "@/db";
 import { staffMessageAction, staffUploadAction } from "@/app/actions/phase1";
 import { DocumentList, UploadForm } from "@/components/documents";
@@ -34,7 +34,9 @@ import { getClient, listClientContacts, listOnboardingItems } from "@/services/c
 import { firmToday } from "@/services/dashboard";
 import { listClientDocuments } from "@/services/documents";
 import { listClientEngagements, listStaff } from "@/services/engagements";
-import { listClientInvoices, paypalProvider } from "@/services/invoices";
+import { listClientInvoices } from "@/services/invoices";
+import { getClientQboBillingReadiness, getQboClientCustomerLink } from "@/services/qbo-connections";
+import { QboCustomerMatch } from "@/app/staff/integrations/qbo-customer-match";
 import { ACTIVITY_LABELS, getClientTeam, listClientActivity } from "@/services/insights";
 import { listClientConversations } from "@/services/messages";
 import { listTasks } from "@/services/tasks";
@@ -543,51 +545,52 @@ async function BillingTab({
   today: string;
   firmId: string;
 }) {
-  const provider = paypalProvider();
   const canCreate = can(actor, "billing", "create");
-  const [rows, subs] = await Promise.all([listClientInvoices(getDb(), actor, clientId, provider), listClientSubscriptions(getDb(), actor, clientId)]);
+  const [rows, subs] = await Promise.all([listClientInvoices(getDb(), actor, clientId), listClientSubscriptions(getDb(), actor, clientId)]);
+  const [readiness, currentMatch] = await Promise.all([
+    getClientQboBillingReadiness(getDb(), actor.firmId, clientId),
+    actor.role === "admin" ? getQboClientCustomerLink(getDb(), actor, clientId) : Promise.resolve(null),
+  ]);
   return (
     <div className="grid gap-5 xl:grid-cols-5">
-      <Panel title="Subscriptions" description="Recurring monthly or yearly billing. The client subscribes from their portal." flush className="xl:col-span-3">
+      {actor.role === "admin" ? (
+        <Panel title="QuickBooks customer match" className="xl:col-span-5">
+          <QboCustomerMatch recordId={clientId} current={currentMatch} canManage />
+        </Panel>
+      ) : null}
+      {!readiness.ready ? (
+        <Panel title="QuickBooks billing setup" className="xl:col-span-5">
+          <Alert tone="warning" title="Billing actions unavailable">
+            {readiness.message} <Link href="/staff/integrations" className="ml-1 font-medium text-brand hover:underline">Open Integrations</Link>
+          </Alert>
+        </Panel>
+      ) : null}
+      <Panel title="Subscriptions" description="Recurring QuickBooks invoices sent on the schedule; payments are completed in QuickBooks." flush className="xl:col-span-3">
         {subs.length ? (
           <SubscriptionTable rows={subs} showClient={false} canCancel={isManagerOrAdmin(actor)} firmId={firmId} />
         ) : (
           <EmptyState icon={<Repeat />} title="No subscriptions">
-            Set up a plan (for example, monthly bookkeeping). The client gets a Subscribe button in their portal and is then charged automatically.
+            Set up a monthly or yearly invoice schedule. The client is not charged automatically.
           </EmptyState>
         )}
       </Panel>
       {canCreate ? (
         <Panel title="New subscription" className="xl:col-span-2">
-          {provider.isConfigured ? <NewSubscriptionForm clientId={clientId} clientEmail={clientEmail} firmId={firmId} /> : <p className="text-[13px] text-muted">Connect PayPal to set up subscriptions.</p>}
+          {readiness.ready ? <NewSubscriptionForm clientId={clientId} clientEmail={clientEmail} firmId={firmId} /> : <p className="text-[13px] text-muted">Complete the QuickBooks setup above before creating invoice schedules.</p>}
         </Panel>
       ) : null}
-      <Panel title="Invoices" description="Stored in PayPal; payment status refreshes automatically." flush className="xl:col-span-3">
+      <Panel title="Invoices" description="Stored in QuickBooks; payment status refreshes from the connected company." flush className="xl:col-span-3">
         {rows.length ? (
           <InvoiceTable rows={rows} showClient={false} canCancel={isManagerOrAdmin(actor)} today={today} firmId={firmId} />
         ) : (
           <EmptyState icon={<Receipt />} title="No invoices yet">
-            Invoices you create here are emailed by PayPal. The client can pay by card or PayPal, and also sees them in the portal.
+            Invoices created here are sent through QuickBooks. Clients use the QuickBooks invoice link to pay.
           </EmptyState>
         )}
       </Panel>
       {canCreate ? (
         <Panel title="New invoice" className="xl:col-span-2">
-          {provider.isConfigured ? (
-            <NewInvoiceForm clientId={clientId} clientEmail={clientEmail} engagements={engagements.map((e) => ({ value: e.id, label: e.taxYear ? `${e.title} (${e.taxYear})` : e.title }))} firmId={firmId} />
-          ) : (
-            <EmptyState
-              icon={<CreditCard />}
-              title="PayPal not connected"
-              action={
-                <ButtonLink href="/staff/integrations" variant="secondary" size="sm">
-                  View integrations
-                </ButtonLink>
-              }
-            >
-              Add the PayPal app credentials to the server settings to create invoices.
-            </EmptyState>
-          )}
+          {readiness.ready ? <NewInvoiceForm clientId={clientId} clientEmail={clientEmail} engagements={engagements.map((e) => ({ value: e.id, label: e.taxYear ? `${e.title} (${e.taxYear})` : e.title }))} firmId={firmId} /> : <p className="text-[13px] text-muted">Complete the QuickBooks setup above before creating invoices.</p>}
         </Panel>
       ) : null}
     </div>

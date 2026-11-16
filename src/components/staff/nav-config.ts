@@ -62,18 +62,18 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       live("documents", "/staff/documents", "Documents", "documents", "Uploads, folders, document requests"),
       live("messages", "/staff/messages", "Messages", "messages", "Secure client communication", { badge: "unreadMessages" }),
-      // E-signatures stay "Soon" until Dropbox Sign is connected AND the firm has enabled it after testing.
-      process.env.DROPBOX_SIGN_ENABLED === "1" && !!process.env.DROPBOX_SIGN_API_KEY?.trim()
+      // Configured firms can use the dashboard to run admin-only test requests before live enablement.
+      process.env.DROPBOX_SIGN_API_KEY?.trim()
         ? live("e-signatures", "/staff/e-signatures", "E-Signatures", "esign", "Engagement letters and signature requests via Dropbox Sign")
-        : planned("e-signatures", "E-Signatures", "esign", "Engagement letters and signature requests", { needs: "Connecting the Dropbox Sign e-signature provider (API key + webhook) and a successful test. Documents are sent for signature and signed on Dropbox Sign; the signed copy and its audit trail are stored here. Signatures are never captured or simulated inside this app." }),
+        : planned("e-signatures", "E-Signatures", "esign", "Engagement letters and signature requests", { needs: "Connect the Dropbox Sign provider with a server-side API key. Documents are sent for signature and signed on Dropbox Sign; the signed copy and its audit trail are stored here. Signatures are never captured or simulated inside this app." }),
       live("client-portal", "/staff/client-portal", "Client Portal", "portal", "Client-facing portal management"),
     ],
   },
   {
     title: "Financial Management",
     items: [
-      live("invoices", "/staff/invoices", "Invoices & Billing", "invoices", "Create invoices, send them through PayPal and track payment", { module: "billing" }),
-      planned("payments", "Payments", "payments", "Payment status and transaction history", { module: "billing", needs: "Invoice payments are already tracked on Invoices & Billing (via PayPal). This page will add a full transaction history (payouts, fees and refunds) from PayPal’s reporting API. Card details will never be stored in this app." }),
+      live("invoices", "/staff/invoices", "Invoices & Billing", "invoices", "Create QuickBooks invoices and track payment status", { module: "billing" }),
+      planned("payments", "Payments", "payments", "Payment status and transaction history", { module: "billing", needs: "Invoice payment status is synced from QuickBooks on Invoices & Billing. This page may add a consolidated transaction history from QuickBooks reporting." }),
       live("reports", "/staff/reports", "Financial Reports", "reports", "Revenue, outstanding balances", { module: "reports" }),
       live("integrations", "/staff/integrations", "Integrations", "integrations", "QuickBooks Online and other integrations", { module: "integrations" }),
     ],

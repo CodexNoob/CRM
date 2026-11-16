@@ -9,7 +9,7 @@ import { formatDate, formatMoney, LEAD_STATUS_LABELS, ROLE_LABELS, SERVICE_LABEL
 import { dueLabel, ENGAGEMENT_TONE, LEAD_TONE, TASK_TONE } from "@/lib/status";
 import { DUE_SOON_DAYS, firmToday, getDashboard, getWorkspaceOverview } from "@/services/dashboard";
 import { invoiceTotals } from "@/services/invoices";
-import { paypalConfig } from "@/integrations/paypal";
+import { getQboConnectionView, qboFirmFinancialActionsEnabled } from "@/services/qbo-connections";
 import { getWorkload, listWorkspaceActivity, type WorkspaceActivity } from "@/services/insights";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -104,12 +104,13 @@ export default async function StaffDashboard({ searchParams }: { searchParams: P
   const mine = view === "mine";
   const now = new Date();
   const db = getDb();
-  const [d, o, workload, activity, billing] = await Promise.all([
+  const [d, o, workload, activity, billing, qbo] = await Promise.all([
     getDashboard(db, actor, { mine, now }),
     getWorkspaceOverview(db, actor, { mine, now }),
     getWorkload(db, actor),
     listWorkspaceActivity(db, actor, 15),
     invoiceTotals(db, actor, firmToday(now), now),
+    getQboConnectionView(db, { type: "firm", firmId: actor.firmId }, now),
   ]);
   const longDate = new Intl.DateTimeFormat("en-US", { timeZone: FIRM_TZ, weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(now);
   const k = o.kpis;
@@ -323,7 +324,7 @@ export default async function StaffDashboard({ searchParams }: { searchParams: P
           </Panel>
 
           <Panel title="Billing" actions={<ButtonLink href="/staff/invoices" variant="ghost" size="sm">View invoices</ButtonLink>}>
-            {paypalConfig().isConfigured ? (
+            {qbo.status === "connected" && qboFirmFinancialActionsEnabled() ? (
               <dl className="grid grid-cols-2 gap-3 text-[13px]">
                 {[
                   ["Outstanding", formatMoney(billing.outstandingCents), billing.outstandingCents ? "text-warning-ink" : "text-ink"],
@@ -338,8 +339,8 @@ export default async function StaffDashboard({ searchParams }: { searchParams: P
                 ))}
               </dl>
             ) : (
-              <EmptyState icon={<Plug />} title="PayPal not connected" action={<ButtonLink href="/staff/integrations" variant="secondary" size="sm">View integrations</ButtonLink>}>
-                Invoices and payments appear here once PayPal is connected. No figures are shown until then.
+              <EmptyState icon={<Plug />} title="QuickBooks billing not ready" action={<ButtonLink href="/staff/integrations" variant="secondary" size="sm">View integrations</ButtonLink>}>
+                Verify the firm’s QuickBooks connection and sandbox invoice/payment workflow before enabling financial actions.
               </EmptyState>
             )}
           </Panel>

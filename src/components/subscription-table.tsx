@@ -6,9 +6,9 @@ import { formatDate, formatMoney } from "@/lib/labels";
 import type { SubscriptionRow } from "@/services/subscriptions";
 
 export const SUBSCRIPTION_STATUS: Record<string, { label: string; tone: Tone }> = {
-  pending: { label: "Waiting for client", tone: "warn" },
+  pending: { label: "Setup pending", tone: "warn" },
   active: { label: "Active", tone: "good" },
-  suspended: { label: "Suspended (payment failed)", tone: "danger" },
+  suspended: { label: "Billing needs attention", tone: "danger" },
   cancelled: { label: "Cancelled", tone: "neutral" },
   expired: { label: "Ended", tone: "neutral" },
 };
@@ -23,7 +23,7 @@ export function SubscriptionTable({ rows, showClient, canCancel, firmId }: { row
         { label: "Plan" },
         ...(showClient ? [{ label: "Client" }] : []),
         { label: "Amount", align: "right" as const },
-        { label: "Next payment", hideBelow: "md" as const },
+        { label: "Next invoice", hideBelow: "md" as const },
         { label: "Status" },
         { label: "Actions", align: "right" as const },
       ]}
@@ -34,7 +34,7 @@ export function SubscriptionTable({ rows, showClient, canCancel, firmId }: { row
           <tr key={r.id}>
             <td className={td}>
               <div className="font-medium text-ink">{r.name}</div>
-              <div className="text-[12px] text-muted">{r.lastPaymentAt ? `Last paid ${day(r.lastPaymentAt)}` : `Set up ${day(r.createdAt)}`}</div>
+              <div className="text-[12px] text-muted">{r.lastPaymentAt ? `Last paid ${day(r.lastPaymentAt)}` : `Started ${day(r.createdAt)}`}</div>
             </td>
             {showClient ? (
               <td className={td}>

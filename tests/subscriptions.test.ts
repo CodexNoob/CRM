@@ -1,155 +1,153 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import type { DbHandle } from "@/db";
-import { auditEvents, clients } from "@/db/schema";
-import type { PayPalSubscriptionSnapshot } from "@/integrations/paypal";
+import { clients, invoices, qboConnections, qboCustomerLinks, subscriptions } from "@/db/schema";
+import { encryptToken, type QboConfig } from "@/integrations/qbo";
 import type { Actor } from "@/lib/auth/actor";
-import { ForbiddenError, IntegrationNotConfiguredError, NotFoundError, ValidationError } from "@/lib/errors";
-import { createEngagement } from "@/services/engagements";
-import {
-  cancelSubscription,
-  createSubscriptionPlan,
-  listClientSubscriptions,
-  listPortalSubscriptions,
-  listSubscriptions,
-  mapSubscriptionStatus,
-  refreshSubscription,
-  startPortalSubscription,
-  type SubscriptionProvider,
-} from "@/services/subscriptions";
-import { createClientWithPortalUser, createTestDb, createUser } from "./helpers";
+import { ForbiddenError, IntegrationNotConfiguredError, NotFoundError } from "@/lib/errors";
+import { issueScheduledInvoice } from "@/services/invoices";
+import { cancelSubscription, createSubscriptionPlan, listDueSubscriptions, listPortalSubscriptions } from "@/services/subscriptions";
+import { createTestDb, createTestFirm, createUser } from "./helpers";
 
-let n = 0;
-const subs = new Map<string, PayPalSubscriptionSnapshot>();
-
-function fakePayPal() {
-  const state = { configured: true, calls: [] as string[] };
-  const provider: SubscriptionProvider = {
-    get isConfigured() {
-      return state.configured;
-    },
-    currency: "USD",
-    async createPlan(input) {
-      n += 1;
-      state.calls.push(`plan:${input.interval}:${input.amountCents}`);
-      return { planId: `P-${n}` };
-    },
-    async startSubscription(input) {
-      n += 1;
-      const s: PayPalSubscriptionSnapshot = { id: `I-${n}`, status: "APPROVAL_PENDING", nextBillingAt: null, lastPaymentAt: null, lastPaymentCents: null, approveUrl: `https://www.sandbox.paypal.com/webapps/billing/subscriptions?ba_token=BA-${n}` };
-      subs.set(s.id, s);
-      state.calls.push(`start:${input.planId}:${input.subscriberEmail}:${input.returnUrl}`);
-      return s;
-    },
-    async getSubscription(id) {
-      return subs.get(id)!;
-    },
-    async cancelSubscription(id) {
-      subs.set(id, { ...subs.get(id)!, status: "CANCELLED" });
-      state.calls.push(`cancel:${id}`);
-    },
-  };
-  const activate = (id: string) => subs.set(id, { ...subs.get(id)!, status: "ACTIVE", nextBillingAt: new Date("2026-12-12T10:00:00Z"), lastPaymentAt: new Date(), lastPaymentCents: 25000, approveUrl: null });
-  return { provider, state, activate };
-}
-
-const urls = { returnUrl: "http://localhost:3000/portal/invoices?subscribed=1", cancelUrl: "http://localhost:3000/portal/invoices?subscribed=0", brandName: "Test Firm" };
+const KEY = Buffer.alloc(32, 9).toString("base64");
+const config: QboConfig = {
+  clientId: "test-client",
+  clientSecret: "test-secret",
+  appUrl: "http://localhost:3000",
+  redirectUri: "http://localhost:3000/api/integrations/qbo/callback",
+  tokenEncryptionKey: KEY,
+  environment: "sandbox",
+};
 
 let h: DbHandle;
-let admin: Actor, prepA: Actor, prepB: Actor, portalA: Actor, portalB: Actor;
-let clientA: string, clientB: string;
-let pp: ReturnType<typeof fakePayPal>;
+let admin: Actor;
+let portal: Actor;
+let clientId: string;
+let firmId: string;
+let externalCreateCount: number;
+let fetchMock: ReturnType<typeof vi.fn>;
+
+async function setupFirm() {
+  firmId = await createTestFirm(h.db, `Schedule Firm ${crypto.randomUUID()}`);
+  admin = await createUser(h.db, { role: "admin", firmId });
+  const [client] = await h.db.insert(clients).values({
+    firmId,
+    type: "individual",
+    displayName: "Client with schedule",
+    email: "client@example.test",
+    createdById: admin.userId,
+  }).returning();
+  clientId = client!.id;
+  portal = await createUser(h.db, { role: "client", clientId, firmId });
+  const [connection] = await h.db.insert(qboConnections).values({
+    scope: "firm",
+    firmId,
+    realmId: "sandbox-company",
+    companyName: "Test Sandbox",
+    accessTokenEncrypted: encryptToken("access-token", config),
+    refreshTokenEncrypted: encryptToken("refresh-token", config),
+    accessExpiresAt: new Date(Date.now() + 3600_000),
+    refreshExpiresAt: new Date(Date.now() + 30 * 24 * 3600_000),
+    defaultItemId: "service-item",
+    verifiedAt: new Date(),
+    connectedById: admin.userId,
+  }).returning();
+  await h.db.insert(qboCustomerLinks).values({
+    connectionId: connection!.id,
+    firmId,
+    clientId,
+    qboCustomerId: "customer-1",
+    displayName: "Client with schedule",
+    createdById: admin.userId,
+  });
+}
 
 beforeAll(async () => {
   h = await createTestDb();
-  admin = await createUser(h.db, { role: "admin" });
-  prepA = await createUser(h.db, { role: "employee" });
-  prepB = await createUser(h.db, { role: "employee" });
-  const a = await createClientWithPortalUser(h.db, admin, "Client A");
-  const b = await createClientWithPortalUser(h.db, admin, "Client B");
-  clientA = a.client.id;
-  clientB = b.client.id;
-  portalA = a.portalUser;
-  portalB = b.portalUser;
-  await h.db.update(clients).set({ email: "a@example.test" }).where(eq(clients.id, clientA));
-  await h.db.update(clients).set({ email: "b@example.test" }).where(eq(clients.id, clientB));
-  await createEngagement(h.db, admin, clientA, { title: "A books", serviceType: "bookkeeping", ownerId: prepA.userId });
 });
 
 afterAll(async () => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   await h.close();
 });
 
 beforeEach(() => {
-  pp = fakePayPal();
+  vi.stubEnv("QBO_CLIENT_ID", config.clientId!);
+  vi.stubEnv("QBO_CLIENT_SECRET", config.clientSecret!);
+  vi.stubEnv("APP_URL", config.appUrl!);
+  vi.stubEnv("QBO_REDIRECT_URI", config.redirectUri!);
+  vi.stubEnv("QBO_TOKEN_ENCRYPTION_KEY", KEY);
+  vi.stubEnv("QBO_ENVIRONMENT", "sandbox");
+  vi.stubEnv("QBO_FIRM_FINANCIAL_ACTIONS_ENABLED", "1");
+  externalCreateCount = 0;
+  const external = { Id: "recurring-invoice-1", SyncToken: "0", DocNumber: "R-1", TotalAmt: 250, Balance: 250, InvoiceLink: "https://quickbooks.example/invoice/recurring" };
+  fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("/invoice") && init?.method === "POST") {
+      externalCreateCount += 1;
+      return Response.json({ Invoice: external });
+    }
+    if (url.pathname.endsWith("/invoice/recurring-invoice-1/send")) return Response.json({});
+    if (url.pathname.endsWith("/invoice/recurring-invoice-1")) return Response.json({ Invoice: external });
+    throw new Error(`Unexpected QuickBooks test request: ${String(init?.method ?? "GET")} ${url.pathname}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
 });
 
-describe("subscriptions", () => {
-  it("maps PayPal statuses", () => {
-    expect(mapSubscriptionStatus("APPROVAL_PENDING")).toBe("pending");
-    expect(mapSubscriptionStatus("APPROVED")).toBe("pending");
-    expect(mapSubscriptionStatus("ACTIVE")).toBe("active");
-    expect(mapSubscriptionStatus("SUSPENDED")).toBe("suspended");
-    expect(mapSubscriptionStatus("EXPIRED")).toBe("expired");
+describe("recurring QuickBooks invoices", () => {
+  it("creates a local schedule with explicit firm/client isolation and no card auto-charge", async () => {
+    await setupFirm();
+    const schedule = await createSubscriptionPlan(h.db, admin, clientId, {
+      name: "Monthly bookkeeping",
+      amountCents: "250",
+      interval: "month",
+    }, new Date("2026-11-12T10:00:00Z"));
+    expect(schedule).toMatchObject({ status: "active", amountCents: 25000, interval: "month", legacyBilling: false });
+    expect(schedule.nextBillingAt?.toISOString()).toBe("2026-11-12T10:00:00.000Z");
+    expect(await listPortalSubscriptions(h.db, portal)).toHaveLength(1);
+    expect(externalCreateCount).toBe(0);
+
+    const otherFirm = await createTestFirm(h.db, "Isolated Schedule Firm");
+    const otherAdmin = await createUser(h.db, { role: "admin", firmId: otherFirm });
+    await expect(createSubscriptionPlan(h.db, otherAdmin, clientId, { name: "Bad", amountCents: "50", interval: "year" })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(createSubscriptionPlan(h.db, portal, clientId, { name: "Bad", amountCents: "50", interval: "year" })).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it("staff create a monthly or yearly plan; validation and access are enforced first", async () => {
-    const sub = await createSubscriptionPlan(h.db, prepA, clientA, { name: "Monthly bookkeeping", amountCents: "250", interval: "month" }, pp.provider);
-    expect(sub).toMatchObject({ status: "pending", amountCents: 25000, interval: "month", paypalSubscriptionId: null });
-    expect(pp.state.calls).toEqual(["plan:month:25000"]);
-
-    await expect(createSubscriptionPlan(h.db, admin, clientA, { name: "x", amountCents: "abc", interval: "month" }, pp.provider)).rejects.toBeInstanceOf(ValidationError);
-    await expect(createSubscriptionPlan(h.db, admin, clientA, { name: "x", amountCents: "10", interval: "week" }, pp.provider)).rejects.toBeInstanceOf(ValidationError);
-    await expect(createSubscriptionPlan(h.db, prepB, clientA, { name: "x", amountCents: "10", interval: "year" }, pp.provider)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(createSubscriptionPlan(h.db, portalA, clientA, { name: "x", amountCents: "10", interval: "year" }, pp.provider)).rejects.toBeInstanceOf(ForbiddenError);
-    pp.state.configured = false;
-    await expect(createSubscriptionPlan(h.db, admin, clientA, { name: "x", amountCents: "10", interval: "year" }, pp.provider)).rejects.toBeInstanceOf(IntegrationNotConfiguredError);
-    expect(pp.state.calls).toEqual(["plan:month:25000"]);
+  it("retries the same billing period without creating a duplicate QuickBooks invoice", async () => {
+    await setupFirm();
+    const scheduledAt = new Date("2026-11-12T10:00:00Z");
+    const schedule = await createSubscriptionPlan(h.db, admin, clientId, {
+      name: "Monthly bookkeeping",
+      amountCents: "250",
+      interval: "month",
+    }, scheduledAt);
+    const due = (await listDueSubscriptions(h.db, scheduledAt)).find((candidate) => candidate.id === schedule.id);
+    expect(due).toBeDefined();
+    const first = await issueScheduledInvoice(h.db, due!, scheduledAt);
+    const retry = await issueScheduledInvoice(h.db, due!, scheduledAt);
+    expect(first).toMatchObject({ status: "sent", qboInvoiceId: "recurring-invoice-1", subscriptionId: schedule.id });
+    expect(retry.id).toBe(first.id);
+    expect(externalCreateCount).toBe(1);
+    expect(fetchMock.mock.calls.filter(([url, init]) => String(url).includes("/invoice/recurring-invoice-1/send?") && init?.method === "POST")).toHaveLength(1);
+    const rows = await h.db.select().from(invoices).where(and(eq(invoices.subscriptionId, schedule.id), eq(invoices.billingPeriodStart, "2026-11-12")));
+    expect(rows).toHaveLength(1);
+    const updated = await h.db.select().from(subscriptions).where(eq(subscriptions.id, schedule.id));
+    expect(updated[0]?.nextBillingAt?.toISOString()).toBe("2026-12-12T10:00:00.000Z");
   });
 
-  it("the client's Subscribe button starts checkout only for their own pending plan", async () => {
-    const sub = await createSubscriptionPlan(h.db, admin, clientA, { name: "Yearly advisory", amountCents: "1200", interval: "year" }, pp.provider);
-    await expect(startPortalSubscription(h.db, portalB, sub.id, urls, pp.provider)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(startPortalSubscription(h.db, admin, sub.id, urls, pp.provider)).rejects.toBeInstanceOf(ForbiddenError);
-
-    const url = await startPortalSubscription(h.db, portalA, sub.id, urls, pp.provider);
-    expect(url).toContain("paypal.com");
-    expect(pp.state.calls.at(-1)).toContain(`:${portalA.email}:${urls.returnUrl}`);
-
-    // Abandoned checkout: clicking again starts a fresh one.
-    const again = await startPortalSubscription(h.db, portalA, sub.id, urls, pp.provider);
-    expect(again).not.toBe(url);
-
-    // Client approves in PayPal → active on the next refresh, once.
-    const [row] = (await listClientSubscriptions(h.db, admin, clientA, pp.provider)).filter((r) => r.id === sub.id);
-    expect(row!.status).toBe("pending");
-    const paypalId = [...subs.keys()].at(-1)!;
-    pp.activate(paypalId);
-    const active = await refreshSubscription(h.db, admin, sub.id, pp.provider);
-    expect(active.status).toBe("active");
-    expect(active.activatedAt).not.toBeNull();
-    expect(active.nextBillingAt?.toISOString()).toBe("2026-12-12T10:00:00.000Z");
-    await refreshSubscription(h.db, admin, sub.id, pp.provider);
-    const activations = await h.db.select().from(auditEvents).where(and(eq(auditEvents.entityId, sub.id), eq(auditEvents.action, "subscription.activate")));
-    expect(activations).toHaveLength(1);
-
-    // Once active, it cannot be started again.
-    await expect(startPortalSubscription(h.db, portalA, sub.id, urls, pp.provider)).rejects.toBeInstanceOf(ValidationError);
+  it("stops future invoices when an administrator cancels the schedule", async () => {
+    await setupFirm();
+    const schedule = await createSubscriptionPlan(h.db, admin, clientId, { name: "Annual tax", amountCents: "1200", interval: "year" });
+    await cancelSubscription(h.db, admin, schedule.id);
+    expect((await h.db.select().from(subscriptions).where(eq(subscriptions.id, schedule.id)))[0]?.status).toBe("cancelled");
+    await expect(cancelSubscription(h.db, portal, schedule.id)).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it("only admins/partners cancel; PayPal is told for live subscriptions", async () => {
-    const [activeRow] = (await listSubscriptions(h.db, admin, pp.provider)).filter((r) => r.status === "active");
-    await expect(cancelSubscription(h.db, prepA, activeRow!.id, pp.provider)).rejects.toBeInstanceOf(ForbiddenError);
-    await cancelSubscription(h.db, admin, activeRow!.id, pp.provider);
-    expect(pp.state.calls.some((c) => c.startsWith("cancel:"))).toBe(true);
-    await expect(cancelSubscription(h.db, admin, activeRow!.id, pp.provider)).rejects.toBeInstanceOf(ValidationError);
-  });
-
-  it("lists respect scope", async () => {
-    await createSubscriptionPlan(h.db, admin, clientB, { name: "B plan", amountCents: "99", interval: "month" }, pp.provider);
-    expect((await listSubscriptions(h.db, prepA, pp.provider)).every((r) => r.clientId === clientA)).toBe(true);
-    expect((await listPortalSubscriptions(h.db, portalA, pp.provider)).some((s) => s.name === "B plan")).toBe(false);
-    expect((await listPortalSubscriptions(h.db, portalB, pp.provider)).map((s) => s.name)).toEqual(["B plan"]);
-    await expect(listPortalSubscriptions(h.db, admin, pp.provider)).rejects.toBeInstanceOf(ForbiddenError);
+  it("does not create schedules before the QuickBooks financial gate is enabled", async () => {
+    await setupFirm();
+    vi.stubEnv("QBO_FIRM_FINANCIAL_ACTIONS_ENABLED", "0");
+    await expect(createSubscriptionPlan(h.db, admin, clientId, { name: "Monthly", amountCents: "250", interval: "month" })).rejects.toBeInstanceOf(IntegrationNotConfiguredError);
+    expect(externalCreateCount).toBe(0);
   });
 });

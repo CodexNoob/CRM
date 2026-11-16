@@ -8,6 +8,7 @@ import { FormMessage, inputClass, SelectField, SubmitButton, TextField, textarea
 import { useToast } from "@/components/toast";
 import { Badge, buttonClass, cx, type Tone } from "@/components/ui";
 import { idleState } from "@/lib/action-state";
+import { UploadDocumentButton } from "../documents/upload-document-button";
 
 export const SIGNATURE_STATUS: Record<string, { label: string; tone: Tone }> = {
   draft: { label: "Draft", tone: "neutral" },
@@ -42,6 +43,7 @@ export interface SignatureListRow {
   sentAt: string | null;
   expiresAt: string | null;
   completedAt: string | null;
+  failureReason: string | null;
   signerCount: number;
   signedCount: number;
 }
@@ -62,7 +64,7 @@ export function SignatureTable({ rows }: { rows: SignatureListRow[] }) {
         { id: "type", label: "Type", options: Object.entries(DOCUMENT_TYPES).map(([value, label]) => ({ value, label })), match: (r, v) => r.documentType === v },
       ]}
       columns={[
-        { id: "title", header: "Request", sort: (r) => r.title, cell: (r) => <div><p className="font-medium text-ink">{r.title}</p><p className="text-[12px] text-muted">{r.number} · {DOCUMENT_TYPES[r.documentType] ?? r.documentType}</p></div> },
+        { id: "title", header: "Request", sort: (r) => r.title, cell: (r) => <div><p className="font-medium text-ink">{r.title}</p><p className="text-[12px] text-muted">{r.number} · {DOCUMENT_TYPES[r.documentType] ?? r.documentType}</p>{r.status === "failed" ? <p className="mt-1 line-clamp-2 text-[12px] text-danger-ink">Dropbox Sign error: {r.failureReason ?? "No provider detail was returned."}</p> : null}</div> },
         { id: "client", header: "Client", sort: (r) => r.clientName, cell: (r) => r.clientName },
         { id: "status", header: "Status", sort: (r) => r.status, cell: (r) => <span className="flex flex-wrap gap-1"><Badge tone={SIGNATURE_STATUS[r.status]?.tone ?? "neutral"} dot>{SIGNATURE_STATUS[r.status]?.label ?? r.status}</Badge>{r.testMode && r.status !== "draft" ? <Badge tone="warn">Test</Badge> : null}</span> },
         { id: "signers", header: "Signed", sort: (r) => r.signedCount, cell: (r) => <span className="tabular">{r.signedCount} / {r.signerCount}</span> },
@@ -80,10 +82,12 @@ export function NewSignatureForm({
   clients,
   documents,
   engagements,
+  canUpload,
 }: {
   clients: { id: string; name: string }[];
   documents: { id: string; clientId: string; name: string }[];
   engagements: { id: string; clientId: string; title: string }[];
+  canUpload: boolean;
 }) {
   const [state, action] = useActionState(createSignatureDraftAction, idleState);
   const [clientId, setClientId] = useState(state.values?.clientId ?? "");
@@ -109,11 +113,21 @@ export function NewSignatureForm({
           </div>
           <div className="space-y-1.5">
             <label htmlFor="documentId" className="block text-[12.5px] font-medium">Document to sign <span className="text-danger" aria-hidden>*</span></label>
-            <select id="documentId" name="documentId" defaultValue={state.values?.documentId} key={clientId} className={inputClass} disabled={!clientId} aria-invalid={err("documentId") ? true : undefined}>
-              <option value="">{clientId ? (docs.length ? "Choose a PDF or Word document" : "Upload a PDF to this client first") : "Choose a client first"}</option>
+            <select id="documentId" name="documentId" defaultValue={state.values?.documentId} key={clientId} className={inputClass} disabled={!clientId || !docs.length} aria-invalid={err("documentId") && (!clientId || docs.length > 0) ? true : undefined}>
+              <option value="">{clientId ? (docs.length ? "Choose a PDF or Word document" : "Upload a PDF or Word document to this client first") : "Choose a client first"}</option>
               {docs.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
-            {err("documentId") ? <p className="text-[12px] text-danger-ink">{err("documentId")}</p> : null}
+            {(!clientId || docs.length > 0) && err("documentId") ? <p className="text-[12px] text-danger-ink">{err("documentId")}</p> : null}
+            {clientId && !docs.length ? (
+              <div className="space-y-2 rounded-md border border-line bg-subtle p-3">
+                <p className="text-[12px] text-muted">This client has no signable PDF or Word document yet. Upload one to continue. It will remain internal unless you choose to share it.</p>
+                {canUpload ? (
+                  <UploadDocumentButton key={clientId} clients={clients} defaultClientId={clientId} />
+                ) : (
+                  <p className="text-[12px] text-muted">Ask a staff member with document-upload access to upload it for this client.</p>
+                )}
+              </div>
+            ) : null}
           </div>
           <div className="space-y-1.5">
             <label htmlFor="engagementId" className="block text-[12.5px] font-medium">Engagement (optional)</label>
@@ -156,14 +170,18 @@ export function NewSignatureForm({
       </section>
 
       <div className="border-t border-line pt-4">
-        <SubmitButton pendingText="Saving…">Save draft and review</SubmitButton>
-        <p className="mt-2 text-[12px] text-muted">Nothing is sent yet — you’ll review the request and send it from the next page.</p>
+        {(!clientId || docs.length > 0) ? (
+          <>
+            <SubmitButton pendingText="Saving…">Save draft and review</SubmitButton>
+            <p className="mt-2 text-[12px] text-muted">Nothing is sent yet — you’ll review the request and send it from the next page.</p>
+          </>
+        ) : null}
       </div>
     </form>
   );
 }
 
-export function SignatureControls({ id, canSend, canVoid, sendLabel }: { id: string; canSend: boolean; canVoid: boolean; sendLabel: string }) {
+export function SignatureControls({ id, canSend, canVoid, sendLabel, testMode }: { id: string; canSend: boolean; canVoid: boolean; sendLabel: string; testMode: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -178,7 +196,9 @@ export function SignatureControls({ id, canSend, canVoid, sendLabel }: { id: str
   return (
     <div className="flex flex-wrap gap-2">
       {canSend ? (
-        <button type="button" disabled={pending} onClick={() => run(() => sendSignatureAction(id), "Send this request through Dropbox Sign now? Signers will receive an email invitation.")} className={buttonClass("primary")}>
+        <button type="button" disabled={pending} onClick={() => run(() => sendSignatureAction(id), testMode
+          ? "Send this test request through Dropbox Sign? It is not legally binding."
+          : "Send this LIVE request through Dropbox Sign? Signers will receive an invitation and the signatures may be legally binding.")} className={buttonClass("primary")}>
           {pending ? "Sending…" : sendLabel}
         </button>
       ) : null}

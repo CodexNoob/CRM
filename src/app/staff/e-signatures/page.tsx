@@ -51,6 +51,12 @@ export default async function ESignaturesPage() {
             Requests are sent in <strong>test mode</strong> and are <strong>not legally binding</strong>. Only admins can send. Set <code>DROPBOX_SIGN_ENABLED=1</code> once a test request completes here.
           </Alert>
         </div>
+      ) : !cfg.testMode ? (
+        <div className="mb-4">
+          <Alert tone="warning" title="Live signing is enabled">
+            Requests may be legally binding. Set <code>DROPBOX_SIGN_TEST_MODE=1</code> and restart or redeploy to return to test mode.
+          </Alert>
+        </div>
       ) : cfg.testMode ? (
         <div className="mb-4">
           <Alert tone="warning">Test mode is on (<code>DROPBOX_SIGN_TEST_MODE=1</code>): requests are not legally binding.</Alert>
@@ -78,6 +84,7 @@ export default async function ESignaturesPage() {
             sentAt: r.sentAt?.toISOString() ?? null,
             expiresAt: r.expiresAt?.toISOString() ?? null,
             completedAt: r.completedAt?.toISOString() ?? null,
+            failureReason: r.failureReason,
             signerCount: r.signerCount,
             signedCount: r.signedCount,
           }))}

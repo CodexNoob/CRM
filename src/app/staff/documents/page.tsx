@@ -11,7 +11,8 @@ import { firmToday } from "@/services/dashboard";
 import { DOCUMENT_CATEGORY_LABELS, DOCUMENT_STATUS_LABELS, DOCUMENT_VISIBILITY_LABELS } from "@/services/document-labels";
 import { listDocumentRequests } from "@/services/document-requests";
 import { listDocuments } from "@/services/documents";
-import { StaffDocumentsTable, UploadDocumentButton, type DocPerms } from "./documents-view";
+import { StaffDocumentsTable, type DocPerms } from "./documents-view";
+import { UploadDocumentButton } from "./upload-document-button";
 import { CreateRequestButton, RequestsTable } from "./requests-view";
 
 export const metadata: Metadata = { title: "Documents" };

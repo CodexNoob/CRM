@@ -40,7 +40,9 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   ]);
 
   const { firm } = billing;
-  const interval = firm.billingInterval === "month" || firm.billingInterval === "year" ? firm.billingInterval : null;
+  const interval = firm.paypalSubscriptionId && (firm.billingInterval === "month" || firm.billingInterval === "year")
+    ? firm.billingInterval
+    : null;
   const summary: SubscriptionSummary = {
     state: billing.access.state,
     locked: firmLocked,
@@ -48,8 +50,13 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     reason: billing.access.reason,
     canManage: billing.canManage,
     paypalReady: billing.paypalReady,
-    paying: (firm.status === "active" || firm.status === "past_due") && !!firm.paypalSubscriptionId,
+    paypalSetupMessage: billing.paypalSetupMessage,
+    paying: ((firm.status === "active" || firm.status === "past_due") && !!firm.paypalSubscriptionId)
+      || (firm.status === "cancelled" && !!firm.paypalSubscriptionId && !!firm.nextBillingAt && firm.nextBillingAt > new Date())
+      || (firm.status === "trial" && !!firm.paypalSubscriptionId),
     cancelled: firm.status === "cancelled",
+    approvalPending: firm.status === "trial" && !!firm.paypalSubscriptionId,
+    planInterval: interval,
     planLabel: interval ? `${product.plans[interval].label} · ${new Intl.NumberFormat("en-US", { style: "currency", currency: product.currency }).format(product.plans[interval].amountCents / 100)}` : null,
     trialEndsAt: firm.trialEndsAt?.toISOString() ?? null,
     nextBillingAt: firm.nextBillingAt?.toISOString() ?? null,

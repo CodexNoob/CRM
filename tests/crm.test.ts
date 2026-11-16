@@ -2,8 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { DbHandle } from "@/db";
 import { auditEvents } from "@/db/schema";
-import { IntegrationNotConfiguredError, ValidationError } from "@/lib/errors";
-import { getAccountingProvider } from "@/integrations/qbo";
+import { ValidationError } from "@/lib/errors";
 import { createClient, getClient, listClients, updateClient } from "@/services/clients";
 import {
   createEngagement,
@@ -148,16 +147,5 @@ describe("engagements and tasks", () => {
       expect(err, JSON.stringify(patch)).toBeInstanceOf(ValidationError);
       expect(Object.keys((err as ValidationError).fieldErrors)).toContain(field);
     }
-  });
-});
-
-describe("QuickBooks Online boundary", () => {
-  it("fails explicitly instead of returning fake invoices", async () => {
-    const unconfigured = getAccountingProvider({});
-    expect(unconfigured.isConfigured).toBe(false);
-    await expect(unconfigured.listInvoices("123")).rejects.toBeInstanceOf(IntegrationNotConfiguredError);
-
-    const withCredentials = getAccountingProvider({ clientId: "a", clientSecret: "b", redirectUri: "https://x.test/cb" });
-    await expect(withCredentials.listInvoices("123")).rejects.toThrow(/not been implemented/);
   });
 });

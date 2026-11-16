@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CreditCard, Receipt, Repeat } from "lucide-react";
+import { Receipt, Repeat } from "lucide-react";
 import { getDb } from "@/db";
 import { FirmScopePicker } from "@/components/staff/firm-scope-picker";
 import { InvoiceTable } from "@/components/invoice-table";
@@ -9,7 +9,7 @@ import { isManagerOrAdmin } from "@/lib/auth/actor";
 import { requireStaffActor } from "@/lib/auth/current";
 import { formatMoney } from "@/lib/labels";
 import { firmToday } from "@/services/dashboard";
-import { invoiceTotals, listInvoices, paypalProvider } from "@/services/invoices";
+import { invoiceTotals, listInvoices } from "@/services/invoices";
 import { listSubscriptions } from "@/services/subscriptions";
 import { SubscriptionTable } from "@/components/subscription-table";
 import { listPlatformFirms, resolveFirmContext } from "@/services/firms";
@@ -34,10 +34,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const db = getDb();
   const scope = await resolveFirmContext(db, actor, params.firmId);
   const firms = actor.role === "super_admin" ? await listPlatformFirms(db, actor) : [];
-  const provider = paypalProvider();
   const today = firmToday();
-  // List first: it refreshes stale statuses from PayPal, so the totals below are current.
-  const rows = await listInvoices(db, scope, { status: filter === "all" ? undefined : filter }, provider);
+  const rows = await listInvoices(db, scope, { status: filter === "all" ? undefined : filter });
   const [totals, subs] = await Promise.all([invoiceTotals(db, scope, today), listSubscriptions(db, scope)]);
   const activeSubs = subs.filter((s) => s.status === "active");
   const monthlyRecurring = activeSubs.reduce((sum, s) => sum + (s.interval === "year" ? Math.round(s.amountCents / 12) : s.amountCents), 0);
@@ -47,16 +45,13 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader
         title="Invoices & Billing"
-        description={`Invoices are created and paid through PayPal${provider.isConfigured ? "" : " (not connected)"}. To bill someone, open their client record and choose the Billing tab.`}
+        description="Invoices and payment status are managed through the firm’s QuickBooks company. To bill someone, open their client record and choose the Billing tab."
       />
       {actor.role === "super_admin" ? <FirmScopePicker action="/staff/invoices" currentFirmId={scope.firmId} firms={firms} /> : null}
-      {!provider.isConfigured ? (
-        <Panel className="mb-5">
-          <EmptyState icon={<CreditCard />} title="PayPal not connected" action={<ButtonLink href="/staff/integrations" variant="secondary" size="sm">View integrations</ButtonLink>}>
-            Add PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET to the server settings to create and track invoices.
-          </EmptyState>
-        </Panel>
-      ) : null}
+      <Panel className="mb-5">
+        <p className="text-[13px] text-muted">Financial actions remain disabled until a QuickBooks connection, customer match, service item, and sandbox invoice/payment workflow are verified and enabled.</p>
+        <div className="mt-2"><ButtonLink href="/staff/integrations" variant="secondary" size="sm">Manage QuickBooks connection</ButtonLink></div>
+      </Panel>
       <StatStrip
         className="mb-5"
         items={[

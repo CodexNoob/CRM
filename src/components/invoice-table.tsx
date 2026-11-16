@@ -36,7 +36,7 @@ export function InvoiceTable({ rows, showClient, canCancel, today, firmId }: { r
                     {" · "}
                     <a href={r.payUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 hover:text-brand hover:underline">
                       Payment page <ExternalLink className="size-3" aria-hidden />
-                      <span className="sr-only">(opens PayPal in a new tab)</span>
+                      <span className="sr-only">(opens QuickBooks in a new tab)</span>
                     </a>
                   </>
                 ) : null}

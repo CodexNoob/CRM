@@ -1,6 +1,6 @@
 /**
  * The software product sold to firms (the home page, sign-up and subscription pages).
- * Change the name and prices here. Prices are charged through the operator's PayPal account.
+ * Change the name and prices here. CRM subscriptions are billed through PayPal.
  *
  * TODO(owner): replace PRODUCT name with the real product name before launch.
  */
@@ -23,14 +23,14 @@ export const product = {
     "Engagements, tasks and deadline calendar",
     "Secure client messaging",
     "Website inquiry form and lead pipeline",
-    "Invoices and client subscriptions via PayPal",
+    "Invoices and recurring client billing through QuickBooks Online",
     "Activity logs and role-based access",
   ],
   features: [
     { title: "Every client in one place", body: "Individuals, households and businesses, with their engagements, documents, messages and billing on one record." },
     { title: "Deadlines you won’t miss", body: "Tax-return and bookkeeping work with due dates, tasks and a firm-wide calendar." },
     { title: "A portal clients actually use", body: "Clients follow progress, see what you need, upload W-2s and 1099s securely and message you — no more email attachments." },
-    { title: "Get paid faster", body: "Send invoices and set up monthly or yearly client subscriptions, paid by card or PayPal." },
+    { title: "Get paid faster", body: "Send QuickBooks invoices and schedule recurring invoice billing without storing payment credentials." },
     { title: "Lead management", body: "Capture inquiries, track follow-ups and convert prospects inside your private workspace." },
     { title: "Security first", body: "Role-based access, private workspaces per firm, audit logs, and no card data stored in the app." },
   ],

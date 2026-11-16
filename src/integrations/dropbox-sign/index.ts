@@ -15,13 +15,24 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 export const DROPBOX_SIGN_PROVIDER = "dropbox_sign";
 const BASE = "https://api.hellosign.com/v3";
 
+function apiKey(): string {
+  return process.env.DROPBOX_SIGN_API_KEY?.trim() || "";
+}
+
 export function dropboxSignConfig() {
-  const apiKey = process.env.DROPBOX_SIGN_API_KEY?.trim() || "";
   const clientId = process.env.DROPBOX_SIGN_CLIENT_ID?.trim() || "";
   const testMode = (process.env.DROPBOX_SIGN_TEST_MODE?.trim() ?? "1") !== "0";
   const enabledFlag = process.env.DROPBOX_SIGN_ENABLED?.trim() === "1";
-  const isConfigured = apiKey.length >= 16;
-  return { apiKey, clientId, testMode, isConfigured, isEnabled: isConfigured && enabledFlag, embedded: isConfigured && !!clientId };
+  const configured = apiKey().length >= 16;
+  return { testMode, isConfigured: configured, isEnabled: configured && enabledFlag, embedded: configured && !!clientId };
+}
+
+function redactApiKey(message: string): string {
+  const key = apiKey();
+  if (!key) return message;
+  return message
+    .replaceAll(key, "[redacted]")
+    .replaceAll(Buffer.from(`${key}:`).toString("base64"), "[redacted]");
 }
 
 export class DropboxSignError extends Error {
@@ -29,7 +40,7 @@ export class DropboxSignError extends Error {
     message: string,
     readonly status: number,
   ) {
-    super(message);
+    super(redactApiKey(message));
     this.name = "DropboxSignError";
   }
 }
@@ -86,9 +97,18 @@ export function verifyEventHash(apiKey: string, event: { event_time?: unknown; e
 
 type Fetch = typeof fetch;
 
+async function responseJson<T>(res: Response): Promise<T> {
+  try {
+    return await res.json() as T;
+  } catch {
+    throw new DropboxSignError("Dropbox Sign returned an unreadable response", 502);
+  }
+}
+
 export function dropboxSignProvider(fetchImpl: Fetch = fetch): SignatureProvider {
   const cfg = dropboxSignConfig();
-  const auth = `Basic ${Buffer.from(`${cfg.apiKey}:`).toString("base64")}`;
+  const key = apiKey();
+  const auth = `Basic ${Buffer.from(`${key}:`).toString("base64")}`;
 
   async function call(path: string, init: RequestInit & { raw?: boolean } = {}) {
     if (!cfg.isConfigured) throw new DropboxSignError("Dropbox Sign is not configured", 0);
@@ -124,7 +144,7 @@ export function dropboxSignProvider(fetchImpl: Fetch = fetch): SignatureProvider
       // Embedded requests go through the embedded endpoint; others are emailed by Dropbox Sign.
       const path = input.clientId ? "/signature_request/create_embedded" : "/signature_request/send";
       const res = await call(path, { method: "POST", body: form });
-      const body = (await res.json()) as { signature_request?: { signature_request_id?: string; signatures?: { signature_id: string; signer_email_address: string; status_code: string }[] } };
+      const body = await responseJson<{ signature_request?: { signature_request_id?: string; signatures?: { signature_id: string; signer_email_address: string; status_code: string }[] } }>(res);
       const sr = body.signature_request;
       if (!sr?.signature_request_id) throw new DropboxSignError("Dropbox Sign returned no request id", 502);
       return {
@@ -141,15 +161,15 @@ export function dropboxSignProvider(fetchImpl: Fetch = fetch): SignatureProvider
     },
     async embeddedSignUrl(signatureId) {
       const res = await call(`/embedded/sign_url/${encodeURIComponent(signatureId)}`, { method: "POST" });
-      const body = (await res.json()) as { embedded?: { sign_url?: string } };
+      const body = await responseJson<{ embedded?: { sign_url?: string } }>(res);
       if (!body.embedded?.sign_url) throw new DropboxSignError("Dropbox Sign returned no signing URL", 502);
       return body.embedded.sign_url;
     },
     async getStatus(id) {
       const res = await call(`/signature_request/${encodeURIComponent(id)}`);
-      const body = (await res.json()) as {
+      const body = await responseJson<{
         signature_request?: { is_complete?: boolean; is_declined?: boolean; signatures?: { signature_id: string; signer_email_address: string; status_code: string }[] };
-      };
+      }>(res);
       const sr = body.signature_request ?? {};
       return {
         isComplete: !!sr.is_complete,
@@ -158,7 +178,7 @@ export function dropboxSignProvider(fetchImpl: Fetch = fetch): SignatureProvider
       };
     },
     verifyEvent(event) {
-      return verifyEventHash(cfg.apiKey, event);
+      return verifyEventHash(key, event);
     },
   };
 }

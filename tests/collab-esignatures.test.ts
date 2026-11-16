@@ -7,6 +7,7 @@ import { verifyEventHash, type SignatureProvider } from "@/integrations/dropbox-
 import type { Actor } from "@/lib/auth/actor";
 import { AppError, ForbiddenError, NotFoundError } from "@/lib/errors";
 import type { FileStorage } from "@/lib/storage";
+import { getDocumentForDownload } from "@/services/documents";
 import { createEngagement } from "@/services/engagements";
 import {
   createSignatureDraft,
@@ -44,7 +45,7 @@ function memoryStorage(): FileStorage & { files: Map<string, Buffer> } {
 }
 
 function fakeProvider(opts: { configured?: boolean; enabled?: boolean; embedded?: boolean } = {}) {
-  const state = { sent: [] as { title: string; testMode: boolean; signers: string[] }[], cancelled: [] as string[], complete: false, n: 0 };
+  const state = { sent: [] as { title: string; testMode: boolean; signers: string[] }[], cancelled: [] as string[], complete: false, statusFailures: 0, n: 0 };
   const p: SignatureProvider & { state: typeof state } = {
     state,
     name: "dropbox_sign",
@@ -67,6 +68,10 @@ function fakeProvider(opts: { configured?: boolean; enabled?: boolean; embedded?
       return `https://app.hellosign.com/editor/embeddedSign?signature_id=${id}`;
     },
     async getStatus() {
+      if (state.statusFailures > 0) {
+        state.statusFailures -= 1;
+        throw new Error("Temporary provider error");
+      }
       return { isComplete: state.complete, isDeclined: false, signatures: [] };
     },
     verifyEvent(ev) {
@@ -179,6 +184,17 @@ describe("drafts and sending", () => {
     expect(d.signers[0]!.portalUserId).toBe(portalA.userId); // matched by email
     await expect(sendSignatureRequest(h.db, manager, id, { provider: p, storage })).rejects.toThrow(); // only drafts
   });
+
+  it("persists provider failures for the dashboard without losing the error detail", async () => {
+    const p = fakeProvider();
+    p.send = async () => {
+      throw new Error("Dropbox Sign rejected the signer address.");
+    };
+    const { id } = await createSignatureDraft(h.db, manager, draft());
+    await expect(sendSignatureRequest(h.db, admin, id, { provider: p, storage })).rejects.toThrow("Dropbox Sign couldn’t send the request");
+    const row = (await listSignatureRequests(h.db, admin)).find((r) => r.id === id);
+    expect(row).toMatchObject({ status: "failed", failureReason: "Dropbox Sign rejected the signer address." });
+  });
 });
 
 describe("webhooks", () => {
@@ -213,12 +229,13 @@ describe("webhooks", () => {
 
     // An "all signed" event is NOT trusted until the provider confirms completion.
     p.state.complete = false;
-    await processDropboxSignWebhook(h.db, event("signature_request_all_signed", providerId), { provider: p, storage });
+    const allSigned = event("signature_request_all_signed", providerId);
+    await expect(processDropboxSignWebhook(h.db, allSigned, { provider: p, storage })).rejects.toThrow("has not confirmed");
     expect((await getSignatureRequest(h.db, manager, id)).request.status).toBe("partially_signed");
 
     p.state.complete = true;
     await processDropboxSignWebhook(h.db, event("signature_request_signed", providerId, sig1), { provider: p, storage });
-    await processDropboxSignWebhook(h.db, event("signature_request_all_signed", providerId), { provider: p, storage });
+    expect(await processDropboxSignWebhook(h.db, allSigned, { provider: p, storage })).toEqual({ status: 200, outcome: "duplicate" });
     d = await getSignatureRequest(h.db, manager, id);
     expect(d.request.status).toBe("signed");
     expect(d.request.completedAt).not.toBeNull();
@@ -226,8 +243,23 @@ describe("webhooks", () => {
     const [copy] = await h.db.select().from(documents).where(eq(documents.id, d.request.signedDocumentId!));
     expect(copy).toMatchObject({ clientId: clientA, engagementId: engagementA, visibility: "internal_only", category: "engagement_letters", contentType: "application/pdf" });
     expect(storage.files.get(copy!.storageKey)?.subarray(0, 5).toString()).toBe("%PDF-");
+    const retrieved = await getDocumentForDownload(h.db, manager, d.request.signedDocumentId!, { storage });
+    expect(retrieved.data).toEqual(PDF);
     const events = await h.db.select().from(signatureEvents).where(eq(signatureEvents.signatureRequestId, id));
-    expect(events.length).toBe(5); // viewed, signed, all_signed (unconfirmed), signed, all_signed — each once
+    expect(events.length).toBe(4); // viewed, signed, all_signed (retried), signed — each once
+  });
+
+  it("retries a recorded completion callback after a temporary provider error", async () => {
+    const allSigned = event("signature_request_all_signed", providerId);
+    p.state.statusFailures = 1;
+    await expect(processDropboxSignWebhook(h.db, allSigned, { provider: p, storage })).rejects.toThrow("Temporary provider error");
+    expect((await getSignatureRequest(h.db, manager, id)).request.status).toBe("sent");
+
+    p.state.complete = true;
+    expect(await processDropboxSignWebhook(h.db, allSigned, { provider: p, storage })).toEqual({ status: 200, outcome: "duplicate" });
+    const completed = await getSignatureRequest(h.db, manager, id);
+    expect(completed.request.status).toBe("signed");
+    expect(completed.signedDocument).not.toBeNull();
   });
 
   it("records events for unknown requests without changing anything", async () => {

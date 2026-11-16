@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Check, X } from "lucide-react";
 import { logoutAction } from "@/app/actions/auth";
-import { refreshFirmBillingAction } from "@/app/actions/billing";
+import { cancelPendingFirmCheckoutAction, refreshFirmBillingAction } from "@/app/actions/billing";
 import { Alert, Badge } from "@/components/ui";
 import { product, PLAN_INTERVALS } from "@/content/product";
-import { CancelSubscriptionButton, CheckoutButton } from "./billing-controls";
+import { CancelPendingCheckoutButton, CancelSubscriptionButton, CheckoutButton } from "./billing-controls";
 
 export interface SubscriptionSummary {
   state: "trial" | "active" | "past_due" | "locked";
@@ -16,9 +16,12 @@ export interface SubscriptionSummary {
   reason: string | null;
   canManage: boolean;
   paypalReady: boolean;
-  /** Has a PayPal subscription that is active or retrying. */
+  paypalSetupMessage: string | null;
+  /** Has an active, past-due, cancelled, or pending PayPal subscription. */
   paying: boolean;
   cancelled: boolean;
+  approvalPending: boolean;
+  planInterval: "month" | "year" | null;
   planLabel: string | null;
   trialEndsAt: string | null;
   nextBillingAt: string | null;
@@ -30,7 +33,7 @@ const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-
 /**
  * The firm's subscription, as a modal over the CRM.
  * - Locked (trial over / subscription ended): always open, cannot be closed.
- * - Otherwise opened by `?subscription=1` (trial banner, profile dropdown, PayPal return) and closable.
+ * - Otherwise opened by `?subscription=1` (trial banner or profile dropdown) and closable.
  */
 export function SubscriptionModal({ summary }: { summary: SubscriptionSummary }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -41,6 +44,7 @@ export function SubscriptionModal({ summary }: { summary: SubscriptionSummary })
   const returned = params.get("subscribed");
   const open = summary.locked || requested;
   const [refreshing, startRefresh] = useTransition();
+  const [checkoutCancelError, setCheckoutCancelError] = useState<string | null>(null);
 
   useEffect(() => {
     const d = ref.current;
@@ -49,15 +53,28 @@ export function SubscriptionModal({ summary }: { summary: SubscriptionSummary })
     if (!open && d.open) d.close();
   }, [open]);
 
-  // Back from PayPal: confirm the new status straight away instead of waiting for the next sync.
+  // Return from PayPal: confirm the subscription status with the server.
   useEffect(() => {
-    if (returned === "1" && !summary.paying) {
+    if (returned === "1" && (!summary.paying || summary.approvalPending)) {
       startRefresh(async () => {
         await refreshFirmBillingAction();
         router.refresh();
       });
     }
-  }, [returned, summary.paying, router]);
+  }, [returned, summary.paying, summary.approvalPending, router]);
+
+  useEffect(() => {
+    if (returned === "0" && summary.approvalPending) {
+      startRefresh(async () => {
+        const result = await cancelPendingFirmCheckoutAction();
+        if (result.status === "error") {
+          setCheckoutCancelError(result.message ?? "Contact support to clear the pending PayPal checkout.");
+          return;
+        }
+        router.refresh();
+      });
+    }
+  }, [returned, summary.approvalPending, router]);
 
   const close = () => {
     if (summary.locked) return;
@@ -102,13 +119,19 @@ export function SubscriptionModal({ summary }: { summary: SubscriptionSummary })
 
       <div className="space-y-4 px-5 py-4">
         {returned === "1" ? (
-          summary.paying ? (
-            <Alert tone="success" title="Thank you — you’re subscribed">Your subscription is active. A receipt is on its way from PayPal.</Alert>
+          summary.paying && !summary.approvalPending ? (
+            <Alert tone="success" title="Thank you — your subscription is active">PayPal confirmed your subscription.</Alert>
           ) : (
-            <Alert tone="info">{refreshing ? "Checking with PayPal…" : "PayPal is confirming your subscription. This usually takes under a minute."}</Alert>
+            <Alert tone="info">{refreshing ? "Checking PayPal…" : "PayPal is still confirming approval. Refresh shortly."}</Alert>
           )
         ) : returned === "0" ? (
-          <Alert tone="info">You left PayPal before finishing. Nothing was charged.</Alert>
+          checkoutCancelError ? (
+            <Alert tone="warning" title="PayPal checkout could not be cleared">{checkoutCancelError}</Alert>
+          ) : summary.approvalPending ? (
+            <Alert tone="info">{refreshing ? "Cancelling the pending PayPal checkout…" : "PayPal checkout was cancelled. No subscription was started."}</Alert>
+          ) : (
+            <Alert tone="info">PayPal checkout was cancelled. No subscription was started.</Alert>
+          )
         ) : null}
         {summary.reason ? <Alert tone={summary.locked ? "error" : "warning"}>{summary.reason}</Alert> : null}
 
@@ -116,7 +139,9 @@ export function SubscriptionModal({ summary }: { summary: SubscriptionSummary })
           <div>
             <dt className="text-[12px] text-muted">Status</dt>
             <dd className="mt-1">
-              {summary.state === "trial" ? (
+              {summary.approvalPending ? (
+                <Badge tone="info" dot>Awaiting PayPal approval</Badge>
+              ) : summary.state === "trial" ? (
                 <Badge tone="info" dot>Free trial</Badge>
               ) : summary.state === "active" ? (
                 <Badge tone="good" dot>{summary.cancelled ? "Cancelled — access until period end" : "Active"}</Badge>
@@ -128,9 +153,11 @@ export function SubscriptionModal({ summary }: { summary: SubscriptionSummary })
             </dd>
           </div>
           <div>
-            <dt className="text-[12px] text-muted">{summary.state === "trial" ? "Trial ends" : "Plan"}</dt>
+            <dt className="text-[12px] text-muted">{summary.state === "trial" && !summary.approvalPending ? "Trial ends" : "Plan"}</dt>
             <dd className="mt-1 font-medium">
-              {summary.state === "trial" ? `${day(summary.trialEndsAt)}${summary.trialDaysLeft ? ` (${summary.trialDaysLeft} days left)` : ""}` : (summary.planLabel ?? "—")}
+              {summary.state === "trial" && !summary.approvalPending
+                ? `${day(summary.trialEndsAt)}${summary.trialDaysLeft ? ` (${summary.trialDaysLeft} days left)` : ""}`
+                : summary.planLabel ?? "—"}
             </dd>
           </div>
           <div>
@@ -139,48 +166,74 @@ export function SubscriptionModal({ summary }: { summary: SubscriptionSummary })
           </div>
         </dl>
 
-        {!summary.paying ? (
-          summary.canManage ? (
-            summary.paypalReady ? (
+        {summary.approvalPending ? (
+          <div className="space-y-3">
+            {summary.canManage ? (
               <>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {PLAN_INTERVALS.map((interval) => {
-                    const plan = product.plans[interval];
-                    const featured = interval === "year";
-                    return (
-                      <div key={interval} className={"rounded-lg border p-4 " + (featured ? "border-brand" : "border-line")}>
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-[14px] font-semibold">{plan.label}</h3>
-                          {featured ? <Badge tone="brand">2 months free</Badge> : null}
-                        </div>
-                        <p className="mt-2 text-[26px] font-semibold tracking-tight tabular">
-                          {usd(plan.amountCents)}
-                          <span className="text-[13px] font-normal text-muted"> / {plan.per}</span>
-                        </p>
-                        <p className="mb-3 text-[12px] text-muted">{plan.note}</p>
-                        <CheckoutButton interval={interval} label={`Subscribe ${plan.label.toLowerCase()}`} primary={featured} />
-                      </div>
-                    );
-                  })}
+                <Alert tone="info">
+                  {summary.planInterval
+                    ? "A PayPal checkout is waiting for approval. Continue it or cancel it to choose a plan again."
+                    : "A PayPal checkout is waiting for approval, but its plan details are missing. Cancel it to choose a plan again."}
+                </Alert>
+                <div className="flex flex-wrap items-center gap-2">
+                  {summary.planInterval ? (
+                    <CheckoutButton interval={summary.planInterval} label="Continue with PayPal" primary />
+                  ) : null}
+                  <CancelPendingCheckoutButton />
                 </div>
-                <ul className="grid gap-1.5 text-[13px] sm:grid-cols-2">
-                  {product.included.map((f) => (
-                    <li key={f} className="flex items-start gap-2">
-                      <Check className="mt-0.5 size-4 shrink-0 text-success" aria-hidden /> {f}
-                    </li>
-                  ))}
-                </ul>
-                <p className="text-[12px] text-muted">Payments are processed by PayPal (card or PayPal account). Card details never reach this app. Prices in USD.</p>
               </>
             ) : (
-              <Alert tone="warning">Online payment isn’t available yet. Please contact support to subscribe.</Alert>
-            )
+              <Alert tone="info">A PayPal checkout is waiting for approval. Ask your firm admin to continue or cancel it.</Alert>
+            )}
+          </div>
+        ) : !summary.paying ? (
+          summary.canManage ? (
+            <>
+              {!summary.paypalReady ? (
+                <Alert tone="warning" title="PayPal checkout is not ready">
+                  {summary.paypalSetupMessage ?? "Contact support to complete the PayPal API and webhook configuration."}
+                </Alert>
+              ) : null}
+              <div className="grid gap-3 sm:grid-cols-2">
+                {PLAN_INTERVALS.map((interval) => {
+                  const plan = product.plans[interval];
+                  const featured = interval === "year";
+                  return (
+                    <div key={interval} className={"rounded-lg border p-4 " + (featured ? "border-brand" : "border-line")}>
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-[14px] font-semibold">{plan.label}</h3>
+                        {featured ? <Badge tone="brand">2 months free</Badge> : null}
+                      </div>
+                      <p className="mt-2 text-[26px] font-semibold tracking-tight tabular">
+                        {usd(plan.amountCents)}
+                        <span className="text-[13px] font-normal text-muted"> / {plan.per}</span>
+                      </p>
+                      <p className="mb-3 text-[12px] text-muted">{plan.note}</p>
+                      <CheckoutButton
+                        interval={interval}
+                        label={`Subscribe ${plan.label.toLowerCase()}`}
+                        primary={featured}
+                        disabled={!summary.paypalReady}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              <ul className="grid gap-1.5 text-[13px] sm:grid-cols-2">
+                {product.included.map((f) => (
+                  <li key={f} className="flex items-start gap-2">
+                    <Check className="mt-0.5 size-4 shrink-0 text-success" aria-hidden /> {f}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-[12px] text-muted">Payments are processed by PayPal (card or PayPal account). Card details never reach this app. Prices in USD.</p>
+            </>
           ) : (
             <Alert tone="info">Only your firm’s admin can subscribe. Please ask them to sign in and choose a plan.</Alert>
           )
         ) : summary.canManage && !summary.cancelled ? (
           <div className="space-y-2 border-t border-line pt-4">
-            <p className="text-[13px] text-muted">To change your card, use your PayPal account. Cancelling stops future payments; you keep access until the period you’ve paid for ends.</p>
+            <p className="text-[13px] text-muted">Cancelling stops future PayPal charges. You keep access until the paid period ends.</p>
             <CancelSubscriptionButton />
           </div>
         ) : null}

@@ -25,7 +25,7 @@ export default async function NewSignaturePage() {
       <Link href="/staff/e-signatures" className="mb-3 inline-block text-[13px] text-muted hover:text-ink">← E-Signatures</Link>
       <PageHeader title="New signature request" description="Saved as a draft first. You’ll review it before anything is sent." />
       <Panel className="max-w-3xl">
-        <NewSignatureForm clients={options.clients} documents={options.documents} engagements={options.engagements} />
+        <NewSignatureForm clients={options.clients} documents={options.documents} engagements={options.engagements} canUpload={can(actor, "documents", "upload")} />
       </Panel>
     </>
   );

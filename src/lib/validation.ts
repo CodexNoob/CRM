@@ -425,7 +425,7 @@ export function isUuid(value: unknown): value is string {
 /* ───────── Invoices ───────── */
 
 export const INVOICE_MAX_ITEMS = 10;
-/** Per line and per invoice cap ($100,000), well inside PayPal's limits and int4 cents. */
+/** Per line and per invoice cap ($100,000), within QuickBooks limits and int4 cents. */
 const MAX_CENTS = 10_000_000;
 
 /** "1,250.5" → 125050 cents. Rejects negatives, more than 2 decimals and junk. */

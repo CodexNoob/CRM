@@ -465,7 +465,7 @@ async function ActivityTab({ ctx }: { ctx: Ctx }) {
 async function BillingTab({ ctx }: { ctx: Ctx }) {
   const e = ctx.detail.engagement;
   const rows = await getDb()
-    .select({ id: invoices.id, title: invoices.title, number: invoices.paypalInvoiceNumber, status: invoices.status, totalCents: invoices.totalCents, currency: invoices.currency, dueDate: invoices.dueDate })
+    .select({ id: invoices.id, title: invoices.title, number: invoices.qboInvoiceNumber, status: invoices.status, totalCents: invoices.totalCents, currency: invoices.currency, dueDate: invoices.dueDate })
     .from(invoices)
     .where(and(inFirm(invoices.firmId, ctx.actor), eq(invoices.engagementId, e.id)))
     .orderBy(desc(invoices.createdAt));

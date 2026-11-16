@@ -93,9 +93,51 @@ The seed script refuses to write demo data into PostgreSQL unless you pass `--al
 | `DATABASE_POOL_MAX` | no | Max pooled connections (default 10) |
 | `APP_URL` | yes | Public base URL, used in invitation links |
 | `SETUP_CODE` | for first run | One-time code required by `/setup` to create the first admin (24+ characters) |
-| `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_REDIRECT_URI`, `QBO_ENVIRONMENT` | no | Reserved for the QuickBooks Online integration, which is **not implemented yet** |
+| `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | CRM subscriptions | PayPal app credentials; server-side secrets only |
+| `PAYPAL_ENVIRONMENT` | CRM subscriptions | `sandbox` for development; explicitly set to `live` in production |
+| `PAYPAL_CURRENCY` | CRM subscriptions | Three-letter plan currency (default `USD`) |
+| `PAYPAL_WEBHOOK_ID` | CRM subscriptions | ID of the registered PayPal webhook used for signature verification |
+| `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET` | billing | Intuit app credentials; server-side secrets only |
+| `QBO_REDIRECT_URI` | billing | Must exactly equal `${APP_URL}/api/integrations/qbo/callback` |
+| `QBO_ENVIRONMENT` | billing | `sandbox` for development; `production` only after verification |
+| `QBO_TOKEN_ENCRYPTION_KEY` | billing | Base64-encoded 32-byte key used to encrypt OAuth tokens at rest |
+| `QBO_FIRM_FINANCIAL_ACTIONS_ENABLED` | firm client billing | Set to `1` only after that firm's sandbox workflow is verified; otherwise invoice actions remain disabled |
+| `CRON_SECRET` | recurring invoicing | At least 32 random characters; authenticates the scheduled QBO client-invoice endpoint |
+| `DROPBOX_SIGN_API_KEY` | for e-signatures | Dropbox Sign API key; server-side only |
+| `DROPBOX_SIGN_TEST_MODE` | no | `1` (default) sends non-binding test requests; use `0` only for intentional live signing |
+| `DROPBOX_SIGN_ENABLED` | no | `1` enables the tested integration for permitted staff; unset/`0` keeps test sending admin-only |
+| `DROPBOX_SIGN_CLIENT_ID` | no | Optional Dropbox Sign app client ID for embedded signing in the client portal |
 
 Only `.env.example` (placeholders) is committed. `.env*` files are git-ignored. In production, keep secrets in the hosting platform's secret manager.
+
+## Dropbox Sign: setup and deployment
+
+The API key is read by the server integration and is never returned to the browser. Requests use test mode by default. Keep `DROPBOX_SIGN_TEST_MODE=1` while validating the workflow; only set it to `0` when the firm explicitly intends to send legally binding requests. `DROPBOX_SIGN_ENABLED=1` is a separate go-live gate and should only be enabled after a successful end-to-end test. The dashboard identifies test/live mode, and provider failures are shown on the request list and detail.
+
+In Vercel, add these **server-side** project environment variables for the applicable environments:
+
+- `DROPBOX_SIGN_API_KEY` — the account API key; never use a `NEXT_PUBLIC_` prefix.
+- `DROPBOX_SIGN_TEST_MODE=1` — keep enabled during test requests.
+- `DROPBOX_SIGN_ENABLED=1` — only after the test flow is verified; omit it to keep test sending admin-only.
+- `DROPBOX_SIGN_CLIENT_ID` — optional, only for embedded portal signing.
+- `APP_URL` — the public application origin used to construct the callback URL.
+
+In Dropbox Sign account settings, configure this callback URL (use the same deployed origin as `APP_URL`):
+
+```text
+https://<your-vercel-domain>/api/webhooks/dropbox-sign
+```
+
+The callback verifies Dropbox Sign's event hash using `DROPBOX_SIGN_API_KEY`; there is no separate webhook secret. It never trusts a completion event alone: the API must confirm the request is complete and the returned file must be a PDF before the request is marked signed and the file is stored as an internal-only client document.
+
+The e-signature tables and row-level security were added in `drizzle/0020_client_collaboration.sql`; no additional schema migration is required for the current integration fixes. Before deploying to a database that has not applied it, configure `DIRECT_URL` (preferred for migrations) or `DATABASE_URL` for the target database, then run:
+
+```bash
+npm run db:migrate
+npm run db:check
+```
+
+Do not run migrations against a different database than the deployed application uses. The provider and webhook tests use a fake Dropbox Sign response and do not send real requests.
 
 ## Public website
 
@@ -105,7 +147,7 @@ Each subscribing firm has a separate, private organization profile, edited by th
 
 The marketing page includes the product features, pricing, sign-up and contact form. `robots.txt` blocks private application routes, and `sitemap.xml` uses `APP_URL` for the public domain.
 
-**Billing limitation:** PayPal invoices currently use the platform's server-side PayPal account. A firm's organization profile does not change the PayPal merchant identity or settlement destination; per-firm PayPal authorization is not implemented.
+Each subscribing firm may connect its own QuickBooks company for client accounting and billing. CRM plan subscriptions are paid through PayPal; the platform has no QuickBooks billing connection.
 
 ## Architecture
 
@@ -114,7 +156,8 @@ src/
   db/            schema.ts (tables), index.ts (Postgres/PGlite connection + migrations)
   lib/auth/      crypto (argon2id, tokens), sessions, login + lockout, Next.js cookie glue
   services/      business logic + ALL authorization (clients, engagements, tasks, portal, users, audit)
-  integrations/  qbo/ — QuickBooks Online interface (boundary only)
+  integrations/  paypal/ — CRM plan subscriptions and verified webhook API
+                 qbo/ — per-firm QuickBooks OAuth, encrypted tokens, invoices and payment-status API
   app/           pages and Server Actions (thin: authenticate → call service → render)
   components/    UI building blocks
 drizzle/         generated SQL migrations
@@ -155,6 +198,7 @@ Requests for records the actor may not see return **not found**, never "forbidde
   - Staff choose which files to share with the client.
   - Downloads go through `/api/documents/[id]` with a permission check. They are served as attachments, uncached, under a sandbox CSP, and every download is audited.
 - **Messages** (`/staff/messages`, `/portal/messages`): one private thread per client, with unread counts and read tracking. Message bodies are never logged or emailed.
+- **E-signatures** (`/staff/e-signatures`, `/portal/signatures`): admin-controlled Dropbox Sign requests, verified webhook status updates, and signed PDFs stored as internal-only client documents. Test mode is non-binding and remains on by default.
 - **Deadlines & Calendar** (`/staff/calendar`): appointments plus engagement and task due dates in a month grid and an agenda. Times are entered in `FIRM_TIMEZONE` (default `America/New_York`) and stored in UTC. Clients see their upcoming appointments in the portal.
 - New tables have RLS enabled and no Supabase API-role grants (migrations 0003 and 0004).
 
@@ -169,7 +213,8 @@ Requests for records the actor may not see return **not found**, never "forbidde
 
 | Area | Status |
 | --- | --- |
-| **QuickBooks Online** | Interface only (`src/integrations/qbo`). Every call throws `IntegrationNotConfiguredError`; the UI says billing is not connected. See next section. |
+| **PayPal** | CRM plan subscriptions, approval checkout, cancellation, renewal/status synchronization and signature-verified webhooks are implemented. Sandbox is the development default; production requires explicit live configuration. See setup below. |
+| **QuickBooks Online** | Optional per-firm OAuth connections, encrypted refresh-token rotation, explicit customer matching, client invoice creation/sending/voiding and payment-status sync are implemented. Keep firm financial actions disabled until the sandbox workflow is verified. See setup below. |
 | Malware scanning | **Interface only** (`src/lib/storage.ts`). Every file is marked "Not scanned" in the UI until a scanner (e.g. ClamAV or a cloud API) is connected. |
 | Object storage | Files are stored in the encrypted database (`document_blobs`) for the pilot. Moving to private Supabase Storage or S3 means swapping the `FileStorage` implementation. |
 | Email notifications | Not built. No email is sent for messages, invitations or inquiries. |
@@ -177,22 +222,60 @@ Requests for records the actor may not see return **not found**, never "forbidde
 | Password reset (self-service) | Staff can re-issue an invitation link instead. |
 | Rate limiting by IP | Per-account lockout only. Add edge or proxy rate limiting at deployment. |
 | Workflow templates, reminders, automation | Not built (requires a background job runner). |
-| E-signatures, payments, appointment booking | Not built. Plan to use third-party services. |
+| Appointment booking | Not built. |
 | CAPTCHA and edge rate limiting on the inquiry form | Not built. The form currently has a honeypot, a minimum fill time, a per-email hourly cap and a best-effort per-IP limit held in memory. |
 | Online self-scheduling by clients | Not built. Staff book appointments; clients see them in the portal. |
 | Staff user management UI, audit log viewer | CLI and service layer only. |
 | Data retention, backups, deployment configuration | Not built. |
 
-## QuickBooks Online: required setup and next steps
+## PayPal CRM subscriptions: setup and deployment
 
-QBO stays the system of record for invoices and payments. To build the integration:
+CRM plan selection and recurring subscription billing use PayPal. The CRM never handles or stores card data. Development must use PayPal sandbox credentials; production must use the live app credentials and `PAYPAL_ENVIRONMENT=live`. There is no QuickBooks or other payment fallback for CRM subscriptions.
 
-1. Register an app at developer.intuit.com (Accounting scope). Use the sandbox first.
-2. Put the client ID, secret and redirect URI in the hosting secret store (`QBO_*` variables). **Never** in source or chat.
-3. Implement the OAuth 2.0 connect and callback route (admin only). Store the refresh token encrypted, keep one connection per firm, and rotate on refresh.
-4. Implement `AccountingProvider.listInvoices` against the QBO API. Map CRM clients to QBO customers with an explicit stored ID, and send mismatches to a review queue.
-5. Sync in a background job. Show failures in an admin queue; never show stale data as current.
-6. Link clients to QBO's hosted payment page. No card data touches this app.
+1. Create a PayPal app in the Developer Dashboard. Use a sandbox app and sandbox buyer account while developing and testing.
+2. Register a webhook at this exact URL (replace the origin with the deployed app's canonical HTTPS origin; no trailing slash):
+
+   ```text
+   https://<your-app-origin>/api/webhooks/paypal
+   ```
+
+   Subscribe to `BILLING.SUBSCRIPTION.ACTIVATED`, `BILLING.SUBSCRIPTION.UPDATED`, `BILLING.SUBSCRIPTION.CANCELLED`, `BILLING.SUBSCRIPTION.EXPIRED`, `BILLING.SUBSCRIPTION.SUSPENDED`, `BILLING.SUBSCRIPTION.PAYMENT.FAILED`, `PAYMENT.SALE.COMPLETED` and `PAYMENT.SALE.DENIED`. Copy the webhook ID PayPal assigns to `PAYPAL_WEBHOOK_ID`; the server verifies each callback with PayPal before processing it.
+3. Configure these server-side Vercel variables separately for Preview and Production:
+   - `APP_URL` — canonical HTTPS origin.
+   - `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` — credentials for the matching sandbox or live PayPal app. Never expose them to the browser or commit them.
+   - `PAYPAL_ENVIRONMENT=sandbox` for development and Preview. Set `PAYPAL_ENVIRONMENT=live` with the live app credentials in Production; production does not silently switch to live.
+   - `PAYPAL_CURRENCY` — optional three-letter currency (defaults to `USD`).
+   - `PAYPAL_WEBHOOK_ID` — ID of the webhook registered for that environment. Sandbox and live webhooks have different IDs.
+4. Test plan checkout, buyer approval, cancellation, successful/failed renewals, and verified webhook delivery in sandbox before configuring production. A subscription becomes active only after PayPal confirmation or a verified PayPal callback. Never configure a CRM payment fallback.
+5. Apply pending database migrations with `npm run db:migrate` and run `npm run db:check`. Forward-only migrations `0024_paypal_crm_subscriptions.sql` and `0025_paypal_event_ordering.sql` restore PayPal subscription tracking, remove platform-owned QBO billing connections and safely order webhook status events while retaining historical QBO CRM-subscription invoices for reconciliation. Do not rewrite or rerun `0023_qbo_billing.sql`; check the migration history before deployment and let the migration runner apply only pending migrations.
+6. If the previous platform-owned Intuit connection was authorized, revoke it in Intuit. Rotate the previously exposed Intuit secret before configuring any environment; do not use credentials from `.env.local`.
+
+## QuickBooks Online: per-firm setup
+
+QuickBooks Online is optional and belongs to each firm. It is only for that firm's accounting and client billing; it does not process CRM plan fees. Firms do not create QBO customers automatically, and financial actions stay disabled until sandbox workflows are verified.
+
+1. Register an Intuit app with the **QuickBooks Online Accounting** scope. Use a sandbox company while developing and testing.
+2. Register this exact callback URI in the Intuit app; do not add a trailing slash or query string:
+
+   ```text
+   https://<your-app-origin>/api/integrations/qbo/callback
+   ```
+
+   The deployed `QBO_REDIRECT_URI` must exactly equal `${APP_URL}/api/integrations/qbo/callback`.
+3. Configure the following server-side Vercel variables for Preview and Production as appropriate:
+   - `APP_URL` — the canonical HTTPS origin of the CRM.
+   - `QBO_CLIENT_ID` and `QBO_CLIENT_SECRET` — Intuit app credentials. Do not expose them to the browser or commit them.
+   - `QBO_REDIRECT_URI` — exact callback above.
+   - `QBO_ENVIRONMENT=sandbox` during development. Use `production` only with the production Intuit app and after sandbox verification.
+   - `QBO_TOKEN_ENCRYPTION_KEY` — base64-encoded 32-byte random key. Generate with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` and keep it stable; changing it makes saved connections unreadable.
+   - `QBO_FIRM_FINANCIAL_ACTIONS_ENABLED` — leave unset/blank until a firm's sandbox connection, explicit customer match, service item, invoice send, hosted payment, and payment-status sync have been verified. Set to `1` only after verification.
+   - `CRON_SECRET` — at least 32 random characters; authenticates scheduled QBO client invoice issuance.
+4. A firm Admin connects that firm's QBO company at **Staff → Integrations**, verifies it, chooses an active service item and explicitly matches each billed client to an existing QBO customer.
+5. Test client invoice creation, email delivery, hosted payment, partial/full payment status refresh and voiding in sandbox before enabling the firm's financial actions. Never use exposed credentials from `.env.local`; rotate them before configuring any environment.
+6. Apply pending migrations with `npm run db:migrate`, then run `npm run db:check`. Do not edit historical migrations that may already be applied.
+7. Vercel schedules `/api/cron/qbo-recurring-invoices` daily at 08:00 UTC using `vercel.json`. The route requires `Authorization: Bearer <CRON_SECRET>` and issues only firm client invoices; CRM subscription renewals are handled by PayPal webhooks.
+
+OAuth `state` is random, hashed at rest, bound to the initiating administrator and connection scope, expires after ten minutes, and is consumed once. Access and refresh tokens are encrypted with AES-256-GCM and rotated server-side. Never log credentials, authorization codes or tokens. Revoked or expired company access requires an administrator to reconnect.
 
 ## Security notes and items for professional review
 

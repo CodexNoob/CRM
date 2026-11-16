@@ -94,7 +94,7 @@ export const ACTIVITY_LABELS: Record<string, string> = {
   "invoice.paid": "received payment for an invoice",
   "invoice.cancel": "cancelled an invoice",
   "subscription.create": "set up a subscription",
-  "subscription.checkout": "started subscribing in PayPal",
+  "subscription.checkout": "started a recurring invoice schedule",
   "subscription.activate": "subscription became active",
   "subscription.cancel": "cancelled a subscription",
 };

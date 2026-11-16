@@ -40,7 +40,7 @@ export default async function SignatureRequestPage({ params, searchParams }: { p
       <PageHeader
         title={r.title}
         description={`${r.requestNumber ? `R-${String(r.requestNumber).padStart(4, "0")} · ` : ""}${DOCUMENT_TYPES[r.documentType] ?? r.documentType} · ${d.clientName}`}
-        actions={<SignatureControls id={r.id} canSend={canSend} canVoid={canVoid} sendLabel={willTest ? "Send test request" : "Send for signature"} />}
+        actions={<SignatureControls id={r.id} canSend={canSend} canVoid={canVoid} sendLabel={willTest ? "Send test request" : "Send for signature"} testMode={willTest} />}
       />
       <div className="mb-4 flex flex-wrap gap-2">
         <Badge tone={status.tone} dot>{status.label}</Badge>

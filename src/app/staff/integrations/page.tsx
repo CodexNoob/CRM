@@ -4,13 +4,15 @@ import { CreditCard, Database, FileSignature, Mail, Receipt, ShieldCheck } from 
 import type { ReactNode } from "react";
 import { getDb } from "@/db";
 import { SimpleTable, td, tdHide } from "@/components/table";
-import { Badge, PageHeader, Panel, StatStrip } from "@/components/ui";
-import { getAccountingProvider } from "@/integrations/qbo";
-import { emailConfig } from "@/integrations/email";
+import { Alert, Badge, PageHeader, Panel, StatStrip } from "@/components/ui";
+import { readQboConfig } from "@/integrations/qbo";
 import { paypalConfig } from "@/integrations/paypal";
+import { emailConfig } from "@/integrations/email";
 import { dropboxSignConfig } from "@/integrations/dropbox-sign";
 import { requireStaffActor } from "@/lib/auth/current";
 import { requirePermission } from "@/services/access";
+import { getQboConnectionView, qboFirmFinancialActionsEnabled } from "@/services/qbo-connections";
+import { QboConnectionControls } from "./qbo-controls";
 
 export const metadata: Metadata = { title: "Integrations" };
 export const dynamic = "force-dynamic";
@@ -29,13 +31,15 @@ async function databaseStatus(): Promise<{ status: Status; detail: string }> {
   }
 }
 
-export default async function IntegrationsPage() {
+export default async function IntegrationsPage({ searchParams }: { searchParams: Promise<{ qbo?: string }> }) {
   const actor = await requireStaffActor();
   requirePermission(actor, "integrations", "view");
+  const { qbo: qboResult } = await searchParams;
   const db = await databaseStatus();
-  const qbo = getAccountingProvider();
+  const qbo = readQboConfig();
+  const qboView = await getQboConnectionView(getDb(), { type: "firm", firmId: actor.firmId });
+  const paypal = paypalConfig();
   const email = emailConfig();
-  const pp = paypalConfig();
   const sign = dropboxSignConfig();
 
   const rows: { name: string; icon: ReactNode; purpose: string; status: Status; detail: string }[] = [
@@ -43,9 +47,20 @@ export default async function IntegrationsPage() {
     {
       name: "QuickBooks Online",
       icon: <Receipt />,
-      purpose: "Accounting and bookkeeping sync (optional; invoices use PayPal)",
-      status: qbo.isConfigured ? "connected" : "not_connected",
-      detail: process.env.QBO_CLIENT_ID ? "Credentials found; the OAuth connection is not built yet" : "Needs an Intuit developer app and OAuth connection",
+      purpose: "Firm invoices and client payments",
+      status: qboView.status === "connected" ? "connected" : qboView.status === "reauthorization_required" || qboView.status === "expired" ? "error" : "not_connected",
+      detail: qboView.companyName ?? (qbo.clientId && qbo.clientSecret ? "Intuit app configured; connect a company" : "Needs an Intuit developer app, token-encryption key, and company connection"),
+    },
+    {
+      name: "PayPal",
+      icon: <CreditCard />,
+      purpose: "CRM subscription checkout and recurring fees",
+      status: paypal.isConfigured && paypal.isWebhookConfigured ? "connected" : "not_connected",
+      detail: !paypal.isConfigured
+        ? paypal.configurationMessage ?? "Configure the PayPal API credentials"
+        : !paypal.isWebhookConfigured
+          ? "API configured; add the PayPal webhook ID to enable checkout"
+          : `Subscription billing · ${paypal.environment}`,
     },
     {
       name: "Email delivery",
@@ -68,21 +83,15 @@ export default async function IntegrationsPage() {
           ? `Enabled${sign.testMode ? " · test mode (not legally binding)" : ""}`
           : "Connected – testing (admins only, test mode)",
     },
-    {
-      name: "PayPal",
-      icon: <CreditCard />,
-      purpose: "Invoices and client payments (card or PayPal)",
-      status: pp.isConfigured ? "connected" : "not_connected",
-      detail: pp.isConfigured
-        ? `${pp.environment === "live" ? "Live" : "Sandbox (test mode, no real money)"} · ${pp.currency}; card data never reaches this app`
-        : "Add PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET; card data never reaches this app",
-    },
   ];
   const connected = rows.filter((r) => r.status === "connected").length;
 
   return (
     <>
       <PageHeader title="Integrations" description="Live status of the services the CRM depends on." />
+      {qboResult === "connected" ? <div className="mb-4"><Alert tone="success">QuickBooks company connected. Verify the company and select its invoice service item before billing.</Alert></div> : null}
+      {qboResult === "cancelled" ? <div className="mb-4"><Alert tone="info">QuickBooks connection was cancelled. No company was linked.</Alert></div> : null}
+      {qboResult === "error" ? <div className="mb-4"><Alert tone="error">QuickBooks could not complete the connection. Confirm Intuit app credentials and the exact callback URI, then try again. No credentials or authorization details were logged.</Alert></div> : null}
       <StatStrip
         className="mb-5"
         items={[
@@ -112,6 +121,19 @@ export default async function IntegrationsPage() {
             </tr>
           ))}
         </SimpleTable>
+      </Panel>
+      <Panel title="Firm QuickBooks Online" description="This connection is only for this firm's accounting and client billing. Customer matching is explicit; the CRM never creates duplicate customers.">
+        <div className="space-y-5">
+          <div>
+            <h2 className="mb-2 text-[13px] font-semibold">This firm’s company</h2>
+            <QboConnectionControls
+              view={qboView}
+              canManage={actor.role === "admin"}
+              environment={qbo.environment}
+              financialActionsEnabled={qboFirmFinancialActionsEnabled()}
+            />
+          </div>
+        </div>
       </Panel>
     </>
   );

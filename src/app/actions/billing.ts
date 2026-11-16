@@ -6,21 +6,33 @@ import { revalidatePath } from "next/cache";
 import { getDb } from "@/db";
 import { errorState, type ActionState } from "@/lib/action-state";
 import { requireStaffActor, setSessionCookie } from "@/lib/auth/current";
+import { IntegrationNotConfiguredError } from "@/lib/errors";
 import { createSession } from "@/lib/auth/sessions";
-import { cancelFirmSubscription, startFirmCheckout, syncFirmBilling } from "@/services/firm-billing";
+import { cancelFirmSubscription, cancelPendingFirmCheckout, startFirmCheckout, syncFirmBilling } from "@/services/firm-billing";
 import { SignupRejectedError, signUpFirm } from "@/services/signup";
 
-const appBase = () => (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+function appBase(): string {
+  const configured = process.env.APP_URL?.trim();
+  if (!configured) throw new IntegrationNotConfiguredError("PayPal", "Set APP_URL to the canonical public CRM origin.");
+  try {
+    const url = new URL(configured);
+    if (url.pathname !== "/" || url.search || url.hash) throw new Error();
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))) throw new Error();
+    return url.origin;
+  } catch {
+    throw new IntegrationNotConfiguredError("PayPal", "APP_URL must be the canonical public HTTPS origin.");
+  }
+}
 
-/** "Subscribe monthly / yearly": sends the firm admin to PayPal to approve. Allowed while locked. */
+/** Starts PayPal checkout for the firm subscription. Allowed while locked. */
 export async function startFirmCheckoutAction(interval: "month" | "year", _prev: ActionState, _formData: FormData): Promise<ActionState> {
   const actor = await requireStaffActor({ allowLocked: true });
   let url: string;
   try {
+    const base = appBase();
     url = await startFirmCheckout(getDb(), actor, interval, {
-      // PayPal sends the admin back to the dashboard with the subscription modal open.
-      returnUrl: `${appBase()}/staff?subscription=1&subscribed=1`,
-      cancelUrl: `${appBase()}/staff?subscription=1&subscribed=0`,
+      returnUrl: `${base}/staff?subscription=1&subscribed=1`,
+      cancelUrl: `${base}/staff?subscription=1&subscribed=0`,
     });
   } catch (error) {
     return errorState(error);
@@ -28,7 +40,7 @@ export async function startFirmCheckoutAction(interval: "month" | "year", _prev:
   redirect(url);
 }
 
-/** Re-checks the firm's subscription with PayPal now (after returning from checkout). */
+/** Re-checks the firm's subscription status with PayPal. */
 export async function refreshFirmBillingAction(): Promise<void> {
   const actor = await requireStaffActor({ allowLocked: true });
   await syncFirmBilling(getDb(), actor.firmId, { force: true });
@@ -43,7 +55,18 @@ export async function cancelFirmSubscriptionAction(_prev: ActionState, _formData
     return errorState(error);
   }
   revalidatePath("/staff", "layout");
-  return { status: "success", message: "Your subscription is cancelled. No further payments will be taken; you keep access until the end of the paid period." };
+  return { status: "success", message: "PayPal renewal is cancelled. Any paid access remains available until its end date." };
+}
+
+export async function cancelPendingFirmCheckoutAction(): Promise<ActionState> {
+  const actor = await requireStaffActor({ allowLocked: true });
+  try {
+    await cancelPendingFirmCheckout(getDb(), actor);
+  } catch (error) {
+    return errorState(error);
+  }
+  revalidatePath("/staff", "layout");
+  return { status: "success", message: "Pending PayPal checkout cancelled." };
 }
 
 /* ───────── Sign-up ───────── */
