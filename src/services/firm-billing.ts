@@ -106,10 +106,10 @@ function isPayPalResourceMissing(error: unknown): boolean {
   return error instanceof paypal.PayPalError && error.status === 404 && error.issue === "RESOURCE_NOT_FOUND";
 }
 
-async function planFor(db: Db, interval: PlanInterval, provider: PayPalSubscriptionProvider): Promise<string> {
+async function planFor(db: Db, interval: PlanInterval, provider: PayPalSubscriptionProvider, refresh = false): Promise<string> {
   const plan = product.plans[interval];
   const [existing] = await db.select().from(platformPlans).where(eq(platformPlans.interval, interval)).limit(1);
-  if (existing && existing.amountCents === plan.amountCents && existing.currency === provider.currency) return existing.paypalPlanId;
+  if (!refresh && existing && existing.amountCents === plan.amountCents && existing.currency === provider.currency) return existing.paypalPlanId;
 
   let planId: string;
   try {
@@ -222,10 +222,11 @@ export async function startFirmCheckout(
     return { requestId, interval };
   });
 
-  const planId = await planFor(db, checkout.interval, provider);
+  let planId: string;
   let snapshot: PayPalSubscriptionSnapshot;
   try {
-    snapshot = await provider.startSubscription({
+    planId = await planFor(db, checkout.interval, provider);
+    const start = () => provider.startSubscription({
       planId,
       subscriberName: actor.name,
       subscriberEmail: actor.email,
@@ -233,7 +234,19 @@ export async function startFirmCheckout(
       ...urls,
       requestId: checkout.requestId,
     });
+    try {
+      snapshot = await start();
+    } catch (error) {
+      // Local databases can retain plan IDs from the other PayPal environment.
+      // PayPal's 404 then identifies a stale/foreign plan; create one in the
+      // selected environment and retry the same idempotent checkout request.
+      if (!(error instanceof paypal.PayPalError && error.status === 404 && error.issue === "RESOURCE_NOT_FOUND")) throw error;
+      planId = await planFor(db, checkout.interval, provider, true);
+      snapshot = await start();
+    }
   } catch (error) {
+    await db.update(firms).set({ paypalCheckoutRequestId: null, updatedAt: now })
+      .where(and(eq(firms.id, firm.id), eq(firms.paypalCheckoutRequestId, checkout.requestId)));
     throw paypalFailure("start PayPal checkout", error);
   }
 
