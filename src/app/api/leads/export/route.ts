@@ -1,7 +1,7 @@
 import { getDb } from "@/db";
 import { getCurrentActor, getCurrentFirmAccess } from "@/lib/auth/current";
 import { ForbiddenError } from "@/lib/errors";
-import { parseLeadFilters, type LeadSearchParams } from "@/app/staff/leads/filters";
+import { parseLeadFilters, type LeadSearchParams } from "@/app/crm/leads/filters";
 import { firmToday } from "@/services/dashboard";
 import { exportLeadsCsv } from "@/services/leads";
 
@@ -9,7 +9,7 @@ import { exportLeadsCsv } from "@/services/leads";
 const BOM = String.fromCharCode(0xfeff);
 
 /**
- * CSV export of the leads matching the same filters as /staff/leads.
+ * CSV export of the leads matching the same filters as /crm/leads.
  * Requires the leads "export" permission (checked in the service). Never cached.
  */
 export async function GET(request: Request) {

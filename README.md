@@ -92,6 +92,11 @@ The seed script refuses to write demo data into PostgreSQL unless you pass `--al
 | `DATABASE_SSL_CA_PATH` | no | CA certificate file for providers with their own CA (Supabase: `./certs/supabase-ca-2021.crt`) |
 | `DATABASE_POOL_MAX` | no | Max pooled connections (default 10) |
 | `APP_URL` | yes | Public base URL, used in invitation links |
+| `EMAIL_PROVIDER` | no | `resend` (default) or `brevo` for transactional email |
+| `RESEND_API_KEY` | email | Resend API key when `EMAIL_PROVIDER=resend` |
+| `BREVO_API_KEY` | email | Brevo API key when `EMAIL_PROVIDER=brevo` (not the SMTP key) |
+| `EMAIL_FROM` | email | Sender shown on transactional email; must be authorized by the selected provider |
+| `INQUIRY_NOTIFY_EMAIL` | email | Recipient for website inquiry alert emails |
 | `SETUP_CODE` | for first run | One-time code required by `/setup` to create the first admin (24+ characters) |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | CRM subscriptions | PayPal app credentials; server-side secrets only |
 | `PAYPAL_ENVIRONMENT` | CRM subscriptions | `sandbox` for development; explicitly set to `live` in production |
@@ -109,6 +114,8 @@ The seed script refuses to write demo data into PostgreSQL unless you pass `--al
 | `DROPBOX_SIGN_CLIENT_ID` | no | Optional Dropbox Sign app client ID for embedded signing in the client portal |
 
 Only `.env.example` (placeholders) is committed. `.env*` files are git-ignored. In production, keep secrets in the hosting platform's secret manager.
+
+Email notifications use the selected provider for password resets and website inquiry alerts. For Brevo, enable transactional email, create an API key under SMTP & API settings, verify a sender, then set `EMAIL_PROVIDER=brevo`, `BREVO_API_KEY`, and `EMAIL_FROM` to that sender. The SMTP key is not used by this API integration. Resend remains available with `EMAIL_PROVIDER=resend` and `RESEND_API_KEY`.
 
 ## Dropbox Sign: setup and deployment
 
@@ -141,9 +148,9 @@ Do not run migrations against a different database than the deployed application
 
 ## Public website
 
-`/` is the CRM product website. Its public identity and contact details are stored in the singleton `platform_settings` record and edited by a Super Admin at `/staff/platform-settings`. Public contact requests are stored in `platform_inquiries`; they are not firm leads and are not visible to subscribing firms.
+`/` is the CRM product website. Its public identity and contact details are stored in the singleton `platform_settings` record and edited by a Super Admin at `/crm/platform-settings`. Public contact requests are stored in `platform_inquiries`; they are not firm leads and are not visible to subscribing firms.
 
-Each subscribing firm has a separate, private organization profile, edited by that firm's Admin at `/staff/settings`. The profile is used in its authenticated workspace and client portal. Firm announcements are visible only to authenticated clients in that firm's portal. Public firm pages at `/f/<slug>` are not part of the product.
+Each subscribing firm has a separate, private organization profile, edited by that firm's Admin at `/crm/settings`. The profile is used in its authenticated workspace and client portal. Firm announcements are visible only to authenticated clients in that firm's portal. Public firm pages at `/f/<slug>` are not part of the product.
 
 The marketing page includes the product features, pricing, sign-up and contact form. `robots.txt` blocks private application routes, and `sitemap.xml` uses `APP_URL` for the public domain.
 
@@ -192,14 +199,14 @@ Requests for records the actor may not see return **not found**, never "forbidde
 
 ### Phase 1: core CRM modules
 
-- **Leads & Prospects** (`/staff/leads`): a pipeline (new, contacted, qualified, converted, lost) with owner, follow-up date and internal notes. **Convert to client** creates the client record. The website's contact form creates leads with consent recorded and anti-spam checks.
-- **Documents** (`/staff/documents`, client page, `/portal/documents`): staff and client uploads of up to 25 MB.
+- **Leads & Prospects** (`/crm/leads`): a pipeline (new, contacted, qualified, converted, lost) with owner, follow-up date and internal notes. **Convert to client** creates the client record. The website's contact form creates leads with consent recorded and anti-spam checks.
+- **Documents** (`/crm/documents`, client page, `/portal/documents`): staff and client uploads of up to 25 MB.
   - Only allowed types are accepted, and the file's leading bytes must match its extension. File names are cleaned.
   - Staff choose which files to share with the client.
   - Downloads go through `/api/documents/[id]` with a permission check. They are served as attachments, uncached, under a sandbox CSP, and every download is audited.
-- **Messages** (`/staff/messages`, `/portal/messages`): one private thread per client, with unread counts and read tracking. Message bodies are never logged or emailed.
-- **E-signatures** (`/staff/e-signatures`, `/portal/signatures`): admin-controlled Dropbox Sign requests, verified webhook status updates, and signed PDFs stored as internal-only client documents. Test mode is non-binding and remains on by default.
-- **Deadlines & Calendar** (`/staff/calendar`): appointments plus engagement and task due dates in a month grid and an agenda. Times are entered in `FIRM_TIMEZONE` (default `America/New_York`) and stored in UTC. Clients see their upcoming appointments in the portal.
+- **Messages** (`/crm/messages`, `/portal/messages`): one private thread per client, with unread counts and read tracking. Message bodies are never logged or emailed.
+- **E-signatures** (`/crm/e-signatures`, `/portal/signatures`): admin-controlled Dropbox Sign requests, verified webhook status updates, and signed PDFs stored as internal-only client documents. Test mode is non-binding and remains on by default.
+- **Deadlines & Calendar** (`/crm/calendar`): appointments plus engagement and task due dates in a month grid and an agenda. Times are entered in `FIRM_TIMEZONE` (default `America/New_York`) and stored in UTC. Clients see their upcoming appointments in the portal.
 - New tables have RLS enabled and no Supabase API-role grants (migrations 0003 and 0004).
 
 ### Verified
@@ -217,7 +224,7 @@ Requests for records the actor may not see return **not found**, never "forbidde
 | **QuickBooks Online** | Optional per-firm OAuth connections, encrypted refresh-token rotation, explicit customer matching, client invoice creation/sending/voiding and payment-status sync are implemented. Keep firm financial actions disabled until the sandbox workflow is verified. See setup below. |
 | Malware scanning | **Interface only** (`src/lib/storage.ts`). Every file is marked "Not scanned" in the UI until a scanner (e.g. ClamAV or a cloud API) is connected. |
 | Object storage | Files are stored in the encrypted database (`document_blobs`) for the pilot. Moving to private Supabase Storage or S3 means swapping the `FileStorage` implementation. |
-| Email notifications | Not built. No email is sent for messages, invitations or inquiries. |
+| Email notifications | Website inquiry alerts and password resets use the configured Resend or Brevo provider; invitations are still shared manually. |
 | MFA | **Not built, and required before real client data is loaded.** Add TOTP/WebAuthn or move to a managed identity provider; auth is isolated in `src/lib/auth`. |
 | Password reset (self-service) | Staff can re-issue an invitation link instead. |
 | Rate limiting by IP | Per-account lockout only. Add edge or proxy rate limiting at deployment. |

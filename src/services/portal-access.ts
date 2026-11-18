@@ -55,7 +55,7 @@ export async function assertPortalClientAccess(db: Db, actor: Actor, clientId: s
   return match;
 }
 
-/* ───────── Staff management of portal access (/staff/client-portal) ───────── */
+/* ───────── Staff management of portal access (/crm/client-portal) ───────── */
 
 export interface PortalAccessRow {
   userId: string;

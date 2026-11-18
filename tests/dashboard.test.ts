@@ -83,7 +83,7 @@ describe("dashboard", () => {
     expect(n.some((i) => i.label === "You were assigned to Review")).toBe(true);
     // prepA manages engagements (assigned by the admin) but was never given B's task.
     const a = await getNotifications(h.db, prepA);
-    expect(a.some((i) => i.label.startsWith("You were assigned") && i.href.startsWith("/staff/engagements/"))).toBe(true);
+    expect(a.some((i) => i.label.startsWith("You were assigned") && i.href.startsWith("/crm/engagements/"))).toBe(true);
     expect(a.some((i) => i.label === "You were assigned to Review")).toBe(false);
   });
 

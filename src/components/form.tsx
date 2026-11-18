@@ -1,7 +1,9 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
+import { useState } from "react";
 import type { ReactNode } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import type { ActionState } from "@/lib/action-state";
 import { Alert, buttonClass, cx } from "./ui";
 
@@ -81,24 +83,39 @@ export function TextField(
 ) {
   const { errors, errorId } = useFieldMeta(props);
   const value = props.state.values?.[props.name] ?? props.defaultValue ?? "";
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const isPassword = props.type === "password";
   return (
     <FieldShell {...props} errors={errors} errorId={errorId}>
-      <input
-        id={props.name}
-        name={props.name}
-        type={props.type ?? "text"}
-        defaultValue={value}
-        key={value}
-        required={props.required}
-        autoComplete={props.autoComplete}
-        placeholder={props.placeholder}
-        inputMode={props.inputMode}
-        min={props.min}
-        step={props.step}
-        aria-invalid={errors ? true : undefined}
-        aria-describedby={errorId}
-        className={inputClass}
-      />
+      <div className={isPassword ? "relative" : undefined}>
+        <input
+          id={props.name}
+          name={props.name}
+          type={isPassword && passwordVisible ? "text" : props.type ?? "text"}
+          defaultValue={value}
+          key={value}
+          required={props.required}
+          autoComplete={props.autoComplete}
+          placeholder={props.placeholder}
+          inputMode={props.inputMode}
+          min={props.min}
+          step={props.step}
+          aria-invalid={errors ? true : undefined}
+          aria-describedby={errorId}
+          className={isPassword ? cx(inputClass, "pr-10") : inputClass}
+        />
+        {isPassword ? (
+          <button
+            type="button"
+            onClick={() => setPasswordVisible((visible) => !visible)}
+            aria-label={passwordVisible ? "Hide password" : "Show password"}
+            aria-pressed={passwordVisible}
+            className="absolute inset-y-0 right-1 inline-flex w-8 items-center justify-center rounded text-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+          >
+            {passwordVisible ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
+          </button>
+        ) : null}
+      </div>
     </FieldShell>
   );
 }

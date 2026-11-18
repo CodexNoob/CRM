@@ -38,7 +38,7 @@ export function SubscriptionTable({ rows, showClient, canCancel, firmId }: { row
             </td>
             {showClient ? (
               <td className={td}>
-                <Link href={`/staff/clients/${r.clientId}?tab=billing${firmId ? `&firmId=${encodeURIComponent(firmId)}` : ""}`} className="hover:text-brand hover:underline">
+                <Link href={`/crm/clients/${r.clientId}?tab=billing${firmId ? `&firmId=${encodeURIComponent(firmId)}` : ""}`} className="hover:text-brand hover:underline">
                   {r.clientName}
                 </Link>
               </td>

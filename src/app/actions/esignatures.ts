@@ -39,8 +39,8 @@ export async function createSignatureDraftAction(_prev: ActionState, formData: F
   } catch (error) {
     return errorState(error, formData);
   }
-  revalidatePath("/staff/e-signatures");
-  redirect(`/staff/e-signatures/${id}?created=1`);
+  revalidatePath("/crm/e-signatures");
+  redirect(`/crm/e-signatures/${id}?created=1`);
 }
 
 export async function sendSignatureAction(id: string): Promise<ActionState> {
@@ -50,7 +50,7 @@ export async function sendSignatureAction(id: string): Promise<ActionState> {
   } catch (error) {
     return errorState(error);
   }
-  revalidatePath("/staff/e-signatures", "layout");
+  revalidatePath("/crm/e-signatures", "layout");
   return { status: "success", message: "Sent through Dropbox Sign. Signers receive the invitation from Dropbox Sign." };
 }
 
@@ -61,7 +61,7 @@ export async function voidSignatureAction(id: string): Promise<ActionState> {
   } catch (error) {
     return errorState(error);
   }
-  revalidatePath("/staff/e-signatures", "layout");
+  revalidatePath("/crm/e-signatures", "layout");
   return { status: "success", message: "Request voided." };
 }
 

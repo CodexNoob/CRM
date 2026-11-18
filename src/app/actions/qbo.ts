@@ -27,7 +27,7 @@ export async function verifyQboAction(_previous: ActionState, _formData: FormDat
   const actor = await requireStaffActor({ allowLocked: true });
   try {
     const company = await verifyQboConnection(getDb(), actor, scopeFor(actor));
-    revalidatePath("/staff/integrations");
+    revalidatePath("/crm/integrations");
     return { status: "success", message: `QuickBooks connection verified for ${company}.` };
   } catch (error) {
     return errorState(error);
@@ -38,7 +38,7 @@ export async function disconnectQboAction(_previous: ActionState, _formData: For
   const actor = await requireStaffActor({ allowLocked: true });
   try {
     await disconnectQbo(getDb(), actor, scopeFor(actor));
-    revalidatePath("/staff/integrations");
+    revalidatePath("/crm/integrations");
     return { status: "success", message: "QuickBooks connection removed from this CRM." };
   } catch (error) {
     return errorState(error);
@@ -67,8 +67,8 @@ export async function setQboDefaultItemAction(itemId: string): Promise<ActionSta
   const actor = await requireStaffActor({ allowLocked: true });
   try {
     await setQboDefaultItem(getDb(), actor, scopeFor(actor), itemId);
-    revalidatePath("/staff/integrations");
-    revalidatePath("/staff/invoices");
+    revalidatePath("/crm/integrations");
+    revalidatePath("/crm/invoices");
     return { status: "success", message: "QuickBooks service item saved." };
   } catch (error) {
     return errorState(error);
@@ -79,7 +79,7 @@ export async function linkQboCustomerAction(clientId: string, customerId: string
   const actor = await requireStaffActor({ allowLocked: true });
   try {
     await linkQboCustomer(getDb(), actor, { type: "firm", firmId: actor.firmId }, clientId, customerId);
-    revalidatePath(`/staff/clients/${clientId}`);
+    revalidatePath(`/crm/clients/${clientId}`);
     return { status: "success", message: "QuickBooks customer matched to this client." };
   } catch (error) {
     return errorState(error);

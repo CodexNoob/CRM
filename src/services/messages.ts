@@ -690,7 +690,7 @@ export async function listConversations(db: Db, actor: Actor): Promise<InboxRow[
   return listInbox(db, actor, { folder: "all" });
 }
 
-/** Latest conversation of a client (redirect old /staff/messages/<clientId> links). */
+/** Latest conversation of a client (redirect old /crm/messages/<clientId> links). */
 export async function latestConversationForClient(db: Db, actor: Actor, clientId: string): Promise<string | null> {
   await assertClientAccess(db, actor, clientId);
   const [row] = await db

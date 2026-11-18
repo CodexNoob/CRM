@@ -56,7 +56,7 @@ export function EngagementsTable({
       label={label}
       rows={rows}
       getId={(r) => r.id}
-      rowHref={(r) => `/staff/engagements/${r.id}`}
+      rowHref={(r) => `/crm/engagements/${r.id}`}
       initialSort={{ id: "due", dir: "asc" }}
       search={{ placeholder: "Search engagement or client", text: (r) => `${r.title} ${r.clientName} ${r.ownerName}` }}
       filters={[
@@ -67,7 +67,7 @@ export function EngagementsTable({
       ]}
       bulkActions={bulk}
       columns={[
-        { id: "title", header: "Engagement", sort: (r) => r.title.toLowerCase(), cell: (r) => <CellTitle title={r.title} sub={r.taxYear ? `Tax year ${r.taxYear}` : SERVICE_LABELS[r.serviceType]} href={`/staff/engagements/${r.id}`} /> },
+        { id: "title", header: "Engagement", sort: (r) => r.title.toLowerCase(), cell: (r) => <CellTitle title={r.title} sub={r.taxYear ? `Tax year ${r.taxYear}` : SERVICE_LABELS[r.serviceType]} href={`/crm/engagements/${r.id}`} /> },
         { id: "client", header: "Client", sort: (r) => r.clientName.toLowerCase(), cell: (r) => <span className="text-ink">{r.clientName}</span> },
         ...(showService ? [{ id: "service", header: "Service", sort: (r: EngagementRow) => r.serviceType, hideBelow: "lg" as const, cell: (r: EngagementRow) => <span className="text-muted">{SERVICE_LABELS[r.serviceType]}</span> }] : []),
         { id: "status", header: "Status", sort: (r) => r.status, cell: (r) => <Badge tone={ENGAGEMENT_TONE[r.status]} dot>{STATUS_LABELS[r.status]}</Badge> },
@@ -90,9 +90,9 @@ export function EngagementsTable({
         { id: "tasks", header: "Tasks", align: "right", sort: (r) => r.openTasks, hideBelow: "sm", cell: (r) => r.openTasks },
       ]}
       rowActions={(r) => [
-        { label: "Open engagement", icon: <Briefcase />, href: `/staff/engagements/${r.id}` },
-        { label: "Open client", icon: <Users />, href: `/staff/clients/${r.clientId}` },
-        { label: "Message client", icon: <MessageSquare />, href: `/staff/clients/${r.clientId}?tab=messages` },
+        { label: "Open engagement", icon: <Briefcase />, href: `/crm/engagements/${r.id}` },
+        { label: "Open client", icon: <Users />, href: `/crm/clients/${r.clientId}` },
+        { label: "Message client", icon: <MessageSquare />, href: `/crm/clients/${r.clientId}?tab=messages` },
         { type: "separator" },
         ...bulkStatuses
           .filter((s) => s !== r.status)

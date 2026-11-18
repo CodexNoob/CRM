@@ -30,7 +30,7 @@ async function each(ids: unknown, fn: (id: string) => Promise<void>, noun: strin
       if (!(e instanceof AppError)) console.error("Bulk action failed", { name: (e as Error)?.name });
     }
   }
-  revalidatePath("/staff", "layout");
+  revalidatePath("/crm", "layout");
   if (failures.length) {
     return { status: "error", message: `${ok} ${noun} updated, ${failures.length} skipped (${[...new Set(failures)].slice(0, 2).join("; ")}).` };
   }

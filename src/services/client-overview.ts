@@ -137,13 +137,13 @@ export async function getClientSummary(db: Db, actor: Actor, clientId: string, t
   ]);
 
   const upcoming: UpcomingItem[] = [
-    ...dueEngagements.map((e) => ({ kind: "engagement" as const, id: e.id, title: e.title, dueDate: e.dueDate!, href: `/staff/engagements/${e.id}` })),
+    ...dueEngagements.map((e) => ({ kind: "engagement" as const, id: e.id, title: e.title, dueDate: e.dueDate!, href: `/crm/engagements/${e.id}` })),
     ...dueTasks.map((t) => ({
       kind: "task" as const,
       id: t.id,
       title: t.title,
       dueDate: t.dueDate!,
-      href: t.engagementId ? `/staff/engagements/${t.engagementId}` : `/staff/tasks`,
+      href: t.engagementId ? `/crm/engagements/${t.engagementId}` : `/crm/tasks`,
     })),
   ]
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate))

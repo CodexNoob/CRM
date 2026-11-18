@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function SignupPage({ searchParams }: { searchParams: Promise<{ plan?: string }> }) {
   const actor = await getCurrentActor();
-  if (actor) redirect(actor.role === "client" ? "/portal" : "/staff");
+  if (actor) redirect(actor.role === "client" ? "/portal" : "/crm");
   const { plan } = await searchParams;
   const chosen = plan === "month" || plan === "year" ? product.plans[plan] : null;
 

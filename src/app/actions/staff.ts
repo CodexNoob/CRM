@@ -22,8 +22,8 @@ export async function createClientAction(_prev: ActionState, formData: FormData)
   } catch (error) {
     return errorState(error, formData);
   }
-  revalidatePath("/staff/clients");
-  redirect(`/staff/clients/${id}`);
+  revalidatePath("/crm/clients");
+  redirect(`/crm/clients/${id}`);
 }
 
 export async function updateClientAction(clientId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -33,9 +33,9 @@ export async function updateClientAction(clientId: string, _prev: ActionState, f
   } catch (error) {
     return errorState(error, formData);
   }
-  revalidatePath("/staff/clients");
-  revalidatePath(`/staff/clients/${clientId}`);
-  redirect(`/staff/clients/${clientId}`);
+  revalidatePath("/crm/clients");
+  revalidatePath(`/crm/clients/${clientId}`);
+  redirect(`/crm/clients/${clientId}`);
 }
 
 export async function createEngagementAction(clientId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -46,7 +46,7 @@ export async function createEngagementAction(clientId: string, _prev: ActionStat
   } catch (error) {
     return errorState(error, formData);
   }
-  redirect(`/staff/engagements/${id}`);
+  redirect(`/crm/engagements/${id}`);
 }
 
 export async function updateEngagementAction(
@@ -60,7 +60,7 @@ export async function updateEngagementAction(
   } catch (error) {
     return errorState(error, formData);
   }
-  revalidatePath(`/staff/engagements/${engagementId}`);
+  revalidatePath(`/crm/engagements/${engagementId}`);
   return { status: "success", message: "Engagement saved." };
 }
 
@@ -71,7 +71,7 @@ export async function createTaskAction(engagementId: string, _prev: ActionState,
   } catch (error) {
     return errorState(error, formData);
   }
-  revalidatePath(`/staff/engagements/${engagementId}`);
+  revalidatePath(`/crm/engagements/${engagementId}`);
   return { status: "success", message: "Task added." };
 }
 
@@ -87,7 +87,7 @@ export async function setTaskStatusAction(
   } catch (error) {
     return errorState(error);
   }
-  revalidatePath("/staff", "layout");
+  revalidatePath("/crm", "layout");
   return { status: "success" };
 }
 
@@ -96,7 +96,7 @@ export async function createPortalInviteAction(clientId: string, _prev: ActionSt
   try {
     const { token } = await createPortalInvitation(getDb(), actor, clientId, formValues(formData));
     const base = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
-    revalidatePath(`/staff/clients/${clientId}`);
+    revalidatePath(`/crm/clients/${clientId}`);
     return {
       status: "success",
       message: "Invitation created. Send this link to the client through a trusted channel. It works once and expires in 72 hours.",

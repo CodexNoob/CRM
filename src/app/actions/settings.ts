@@ -31,13 +31,13 @@ async function readLogo(formData: FormData): Promise<LogoUpload | null | undefin
 }
 
 function refreshOrganization() {
-  revalidatePath("/staff/settings");
-  revalidatePath("/staff");
+  revalidatePath("/crm/settings");
+  revalidatePath("/crm");
   revalidatePath("/portal");
 }
 
 function refreshPlatform() {
-  revalidatePath("/staff/platform-settings");
+  revalidatePath("/crm/platform-settings");
   revalidatePath("/");
 }
 
@@ -71,7 +71,7 @@ export async function updatePlatformInquiryStatusAction(id: string, status: "new
   } catch (error) {
     return errorState(error);
   }
-  revalidatePath("/staff/platform-settings");
+  revalidatePath("/crm/platform-settings");
   return { status: "success" };
 }
 

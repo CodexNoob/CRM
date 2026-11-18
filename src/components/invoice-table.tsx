@@ -7,7 +7,7 @@ import type { InvoiceListRow } from "@/services/invoices";
 import { formatDate, formatMoney, INVOICE_STATUS_LABELS } from "@/lib/labels";
 import { dueLabel, INVOICE_TONE } from "@/lib/status";
 
-/** Staff invoice table (used on /staff/invoices and the client Invoices tab). */
+/** Staff invoice table (used on /crm/invoices and the client Invoices tab). */
 export function InvoiceTable({ rows, showClient, canCancel, today, firmId }: { rows: InvoiceListRow[]; showClient: boolean; canCancel: boolean; today: string; firmId?: string }) {
   return (
     <SimpleTable
@@ -44,7 +44,7 @@ export function InvoiceTable({ rows, showClient, canCancel, today, firmId }: { r
             </td>
             {showClient ? (
               <td className={td}>
-                <Link href={`/staff/clients/${r.clientId}?tab=billing${firmId ? `&firmId=${encodeURIComponent(firmId)}` : ""}`} className="hover:text-brand hover:underline">
+                <Link href={`/crm/clients/${r.clientId}?tab=billing${firmId ? `&firmId=${encodeURIComponent(firmId)}` : ""}`} className="hover:text-brand hover:underline">
                   {r.clientName}
                 </Link>
               </td>

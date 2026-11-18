@@ -9,7 +9,7 @@ import { Badge, Card, PageHeader } from "@/components/ui";
 import { requirePortalContext } from "@/lib/auth/portal-context";
 import { NotFoundError } from "@/lib/errors";
 import { getPortalConversation } from "@/services/messages";
-import { CONVERSATION_CATEGORY_LABELS, CONVERSATION_STATUS_TONE, PORTAL_CONVERSATION_STATUS } from "@/app/staff/messages/conversation-labels";
+import { CONVERSATION_CATEGORY_LABELS, CONVERSATION_STATUS_TONE, PORTAL_CONVERSATION_STATUS } from "@/app/crm/messages/conversation-labels";
 
 export const metadata: Metadata = { title: "Conversation" };
 export const dynamic = "force-dynamic";

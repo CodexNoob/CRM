@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import { Badge, Card, EmptyState, PageHeader, cx } from "@/components/ui";
 import { requirePortalContext } from "@/lib/auth/portal-context";
 import { listPortalConversations } from "@/services/messages";
-import { CONVERSATION_CATEGORY_LABELS, CONVERSATION_STATUS_TONE, PORTAL_CONVERSATION_STATUS } from "@/app/staff/messages/conversation-labels";
+import { CONVERSATION_CATEGORY_LABELS, CONVERSATION_STATUS_TONE, PORTAL_CONVERSATION_STATUS } from "@/app/crm/messages/conversation-labels";
 import { PortalNewConversation } from "./portal-message-forms";
 
 export const metadata: Metadata = { title: "Messages" };

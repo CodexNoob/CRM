@@ -183,6 +183,13 @@
       "when": 1794815000000,
       "tag": "0025_paypal_event_ordering",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794979296879,
+      "tag": "0026_password_reset_tokens",
+      "breakpoints": true
     }
   ]
 }

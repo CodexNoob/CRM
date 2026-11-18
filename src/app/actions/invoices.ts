@@ -10,8 +10,8 @@ import { cancelInvoice, createInvoice, refreshInvoice, sendInvoice } from "@/ser
 import { cancelSubscription, createSubscriptionPlan, refreshSubscription } from "@/services/subscriptions";
 
 function revalidateInvoices(clientId: string) {
-  revalidatePath(`/staff/clients/${clientId}`);
-  revalidatePath("/staff/invoices");
+  revalidatePath(`/crm/clients/${clientId}`);
+  revalidatePath("/crm/invoices");
   revalidatePath("/portal/invoices");
 }
 

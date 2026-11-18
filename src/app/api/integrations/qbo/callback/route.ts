@@ -7,7 +7,7 @@ import { completeQboOAuth, consumeQboOAuthState } from "@/services/qbo-connectio
 export const dynamic = "force-dynamic";
 
 function integrationUrl(request: NextRequest, result: "connected" | "cancelled" | "error"): URL {
-  const url = new URL("/staff/integrations", request.url);
+  const url = new URL("/crm/integrations", request.url);
   url.searchParams.set("qbo", result);
   return url;
 }

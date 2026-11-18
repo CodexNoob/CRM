@@ -46,7 +46,7 @@ const DETAIL_LABELS: Record<string, string> = {
 };
 
 function isActive(pathname: string, href: string) {
-  return href === "/staff" ? pathname === "/staff" : pathname === href || pathname.startsWith(`${href}/`);
+  return href === "/crm" ? pathname === "/crm" : pathname === href || pathname.startsWith(`${href}/`);
 }
 
 /** Breadcrumbs derived from the route and the navigation map. */
@@ -54,7 +54,7 @@ function Breadcrumbs({ sections }: { sections: NavSection[] }) {
   const pathname = usePathname();
   const parts = pathname.split("/").filter(Boolean).slice(1);
   const all = sections.flatMap((s) => s.items.map((i) => ({ ...i, section: s.title })));
-  const top = all.find((i) => i.href !== "/staff" && (pathname === i.href || pathname.startsWith(`${i.href}/`))) ?? all.find((i) => i.href === "/staff");
+  const top = all.find((i) => i.href !== "/crm" && (pathname === i.href || pathname.startsWith(`${i.href}/`))) ?? all.find((i) => i.href === "/crm");
   const crumbs: { label: string; href?: string }[] = [];
   if (top) {
     crumbs.push({ label: top.section });
@@ -143,7 +143,7 @@ function SidebarNav({ sections, badges, collapsed, onNavigate }: { sections: Nav
 /** Firm name and mark at the top of the sidebar. Links home; no menu. */
 function WorkspaceBrand({ workspace }: { workspace: ShellProps["workspace"] }) {
   return (
-    <Link href="/staff" className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1 py-1.5 text-white hover:bg-white/5">
+    <Link href="/crm" className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1 py-1.5 text-white hover:bg-white/5">
       {workspace.logoDataUrl ? (
         <Image src={workspace.logoDataUrl} alt="" width={28} height={28} unoptimized className="size-7 shrink-0 rounded-md bg-white object-contain" />
       ) : (
@@ -184,11 +184,11 @@ function UserMenu({ user, compact }: { user: ShellProps["user"]; compact?: boole
         }
         items={[
           { type: "label", label: user.email },
-          { label: "Dashboard", href: "/staff" },
+          { label: "Dashboard", href: "/crm" },
           ...(user.isAdmin
             ? [
                 { label: "Subscription", icon: <CreditCard />, href: `${pathname}?subscription=1` },
-                { label: "Settings", icon: <Settings />, href: "/staff/settings" },
+                { label: "Settings", icon: <Settings />, href: "/crm/settings" },
               ]
             : []),
           { type: "separator" },
@@ -219,7 +219,7 @@ function GlobalSearch() {
       onSubmit={(e) => {
         e.preventDefault();
         const q = ref.current?.value.trim();
-        if (q) router.push(`/staff/search?q=${encodeURIComponent(q)}`);
+        if (q) router.push(`/crm/search?q=${encodeURIComponent(q)}`);
       }}
       className="relative w-full max-w-sm"
     >
@@ -284,10 +284,10 @@ function QuickActions({ isAdmin }: { isAdmin: boolean }) {
         </>
       }
       items={[
-        { label: "Client", icon: <Users />, href: "/staff/clients/new" },
-        { label: "Lead", icon: <Funnel />, href: "/staff/leads#new-lead" },
-        { label: "Appointment", icon: <CalendarPlus />, href: "/staff/calendar#new-appointment" },
-        ...(isAdmin ? [{ type: "separator" as const }, { label: "Invite team member", icon: <UserPlus />, href: "/staff/team#invite" }] : []),
+        { label: "Client", icon: <Users />, href: "/crm/clients/new" },
+        { label: "Lead", icon: <Funnel />, href: "/crm/leads#new-lead" },
+        { label: "Appointment", icon: <CalendarPlus />, href: "/crm/calendar#new-appointment" },
+        ...(isAdmin ? [{ type: "separator" as const }, { label: "Invite team member", icon: <UserPlus />, href: "/crm/team#invite" }] : []),
       ]}
     />
   );
@@ -363,7 +363,7 @@ export function StaffShell({ sections, badges, initialCollapsed, workspace, user
               <div className="hidden w-72 sm:block xl:w-80">
                 <GlobalSearch />
               </div>
-              <Link href="/staff/search" className="inline-flex size-8 items-center justify-center rounded-md text-muted hover:bg-subtle sm:hidden" aria-label="Search">
+              <Link href="/crm/search" className="inline-flex size-8 items-center justify-center rounded-md text-muted hover:bg-subtle sm:hidden" aria-label="Search">
                 <Search className="size-4" />
               </Link>
               <Notifications items={notifications} />

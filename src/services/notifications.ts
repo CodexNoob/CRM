@@ -17,7 +17,7 @@ export async function notifyNewInquiry(lead: { id: string; name: string; service
 
   const service = lead.serviceInterest ? (SERVICE_LABELS[lead.serviceInterest as keyof typeof SERVICE_LABELS] ?? "Not specified") : "Not sure yet";
   // Callers must only invoke this for the firm that owns INQUIRY_NOTIFY_EMAIL (see actions/public.ts).
-  const link = `${appUrl()}/staff/leads/${lead.id}`;
+  const link = `${appUrl()}/crm/leads/${lead.id}`;
   // Keep the name single-line and short so it can't reshape the subject.
   const name = lead.name.replace(/[\r\n]+/g, " ").slice(0, 80);
 
@@ -50,7 +50,7 @@ export async function notifyNewInquiry(lead: { id: string; name: string; service
 export async function notifyPlatformInquiry(inquiryId: string): Promise<void> {
   const cfg = emailConfig();
   if (!cfg.isConfigured || !cfg.inquiryTo) return;
-  const link = `${appUrl()}/staff/platform-settings`;
+  const link = `${appUrl()}/crm/platform-settings`;
   const result = await sendEmail({
     to: cfg.inquiryTo,
     subject: "New CRM platform inquiry",

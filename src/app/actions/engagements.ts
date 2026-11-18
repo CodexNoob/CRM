@@ -34,10 +34,10 @@ function formInput(formData: FormData, multi: string[] = []): Record<string, unk
 }
 
 function refresh(engagementId?: string, clientId?: string) {
-  if (engagementId) revalidatePath(`/staff/engagements/${engagementId}`);
-  revalidatePath("/staff/engagements");
-  if (clientId) revalidatePath(`/staff/clients/${clientId}`);
-  revalidatePath("/staff");
+  if (engagementId) revalidatePath(`/crm/engagements/${engagementId}`);
+  revalidatePath("/crm/engagements");
+  if (clientId) revalidatePath(`/crm/clients/${clientId}`);
+  revalidatePath("/crm");
 }
 
 export async function createEngagementAction(clientId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -49,7 +49,7 @@ export async function createEngagementAction(clientId: string, _prev: ActionStat
     return errorState(error, formData);
   }
   refresh(id, clientId);
-  redirect(`/staff/engagements/${id}?created=1&tab=tasks`);
+  redirect(`/crm/engagements/${id}?created=1&tab=tasks`);
 }
 
 /** "New engagement" from the list: the client comes from the form. */
@@ -124,7 +124,7 @@ export async function createEngagementTaskAction(engagementId: string, _prev: Ac
     return errorState(error, formData);
   }
   refresh(engagementId);
-  revalidatePath("/staff/tasks");
+  revalidatePath("/crm/tasks");
   return { status: "success", message: "Task added." };
 }
 
@@ -136,7 +136,7 @@ export async function setEngagementTaskStatusAction(engagementId: string, taskId
     return errorState(error);
   }
   refresh(engagementId);
-  revalidatePath("/staff/tasks");
+  revalidatePath("/crm/tasks");
   return { status: "success", message: "Task updated." };
 }
 
@@ -174,7 +174,7 @@ export async function generateWorkflowAction(
     return errorState(error);
   }
   refresh(engagementId);
-  revalidatePath("/staff/tasks");
+  revalidatePath("/crm/tasks");
   return { status: "success", message: `${count} tasks created.` };
 }
 
@@ -198,6 +198,6 @@ export async function uploadEngagementDocumentAction(engagementId: string, _prev
     return errorState(error);
   }
   refresh(engagementId, clientId);
-  revalidatePath("/staff/documents");
+  revalidatePath("/crm/documents");
   return { status: "success", message: "File uploaded." };
 }

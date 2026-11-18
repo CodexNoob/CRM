@@ -9,13 +9,14 @@ import { createSession, invalidateSession } from "@/lib/auth/sessions";
 import { createFirstAdmin } from "@/services/setup";
 import { ValidationError } from "@/lib/errors";
 import { acceptInvitation } from "@/services/users";
+import { requestPasswordReset, resetPassword } from "@/services/password-reset";
 
 export async function loginAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   let destination: string;
   try {
     const result = await login(getDb(), { email: formData.get("email"), password: formData.get("password") });
     await setSessionCookie(result.token);
-    destination = result.actor.role === "client" ? "/portal" : "/staff";
+    destination = result.actor.role === "client" ? "/portal" : "/crm";
   } catch (error) {
     return errorState(error, formData);
   }
@@ -49,7 +50,7 @@ export async function firstRunSetupAction(_prev: ActionState, formData: FormData
     // errorState never echoes passwords or the setup code back to the browser.
     return errorState(error, formData);
   }
-  redirect("/staff/team?welcome=1");
+  redirect("/crm/team?welcome=1");
 }
 
 export async function acceptInvitationAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -63,4 +64,29 @@ export async function acceptInvitationAction(_prev: ActionState, formData: FormD
     return errorState(error);
   }
   redirect("/login?setup=done");
+}
+
+export async function requestPasswordResetAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  try {
+    await requestPasswordReset(getDb(), { email: formData.get("email") });
+    return {
+      status: "success",
+      message: "If an active account uses that email, a password reset link will arrive shortly.",
+    };
+  } catch (error) {
+    return errorState(error, formData);
+  }
+}
+
+export async function resetPasswordAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  try {
+    await resetPassword(getDb(), {
+      token: formData.get("token"),
+      password: formData.get("password"),
+      confirmPassword: formData.get("confirmPassword"),
+    });
+  } catch (error) {
+    return errorState(error);
+  }
+  redirect("/login?reset=done");
 }

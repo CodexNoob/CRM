@@ -112,7 +112,7 @@ describe("subscribing to the software", () => {
       getSubscription: async () => snapshot,
       cancelSubscription: async () => {},
     };
-    const urls = { returnUrl: "https://crm.example/staff?subscribed=1", cancelUrl: "https://crm.example/staff?subscribed=0" };
+    const urls = { returnUrl: "https://crm.example/crm?subscribed=1", cancelUrl: "https://crm.example/crm?subscribed=0" };
     await expect(startFirmCheckout(h.db, preparer, "month", urls, provider)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(startFirmCheckout(h.db, admin, "weekly", urls, provider)).rejects.toBeInstanceOf(ValidationError);
     await expect(startFirmCheckout(h.db, admin, "month", urls, { ...provider, isConfigured: false })).rejects.toBeInstanceOf(IntegrationNotConfiguredError);

@@ -50,10 +50,10 @@ export async function getNotifications(db: Db, actor: Actor): Promise<Notificati
       ),
   ]);
   const items: NotificationItem[] = [
-    { id: "overdue", label: "Overdue engagements", detail: "Past their due date", count: overdue[0]?.n ?? 0, href: "/staff/engagements?due=overdue", tone: "danger" },
-    { id: "tasks", label: "Your tasks due", detail: "Due today or overdue", count: myOverdueTasks[0]?.n ?? 0, href: "/staff/tasks", tone: "warn" },
-    { id: "messages", label: "Unread client messages", detail: "Waiting for a reply", count: unread, href: "/staff/messages", tone: "info" },
-    { id: "leads", label: "New leads", detail: "Not yet contacted", count: leadCounts.new, href: "/staff/leads?status=new", tone: "info" },
+    { id: "overdue", label: "Overdue engagements", detail: "Past their due date", count: overdue[0]?.n ?? 0, href: "/crm/engagements?due=overdue", tone: "danger" },
+    { id: "tasks", label: "Your tasks due", detail: "Due today or overdue", count: myOverdueTasks[0]?.n ?? 0, href: "/crm/tasks", tone: "warn" },
+    { id: "messages", label: "Unread client messages", detail: "Waiting for a reply", count: unread, href: "/crm/messages", tone: "info" },
+    { id: "leads", label: "New leads", detail: "Not yet contacted", count: leadCounts.new, href: "/crm/leads?status=new", tone: "info" },
   ];
   return [...items.filter((i) => i.count > 0), ...(await personalNotifications(db, actor))];
 }
@@ -87,14 +87,14 @@ async function personalNotifications(db: Db, actor: Actor): Promise<Notification
     .limit(8);
   return rows.map((r) => {
     const title = typeof r.metadata?.title === "string" ? r.metadata.title : r.entityType === "task" ? "a task" : "an engagement";
-    const href = r.entityType === "task" ? `/staff/tasks/${r.entityId}` : `/staff/engagements/${r.entityId}`;
+    const href = r.entityType === "task" ? `/crm/tasks/${r.entityId}` : `/crm/engagements/${r.entityId}`;
     const kind = typeof r.metadata?.kind === "string" ? r.metadata.kind : null;
     if (kind === "message") {
       const conv = typeof r.metadata?.conversationId === "string" ? r.metadata.conversationId : r.entityType === "conversation" ? r.entityId : null;
-      return { id: `msg-${r.id}`, label: "New message from a client", detail: typeof r.metadata?.subject === "string" ? r.metadata.subject : (r.actorName ?? "Client"), count: 1, href: conv ? `/staff/messages/${conv}` : "/staff/messages", tone: "info" as const };
+      return { id: `msg-${r.id}`, label: "New message from a client", detail: typeof r.metadata?.subject === "string" ? r.metadata.subject : (r.actorName ?? "Client"), count: 1, href: conv ? `/crm/messages/${conv}` : "/crm/messages", tone: "info" as const };
     }
     if (kind === "profile_change_request") {
-      return { id: `profile-${r.id}`, label: "Client asked to update contact details", detail: "Review and update the client record", count: 1, href: r.entityType === "client" ? `/staff/clients/${r.entityId}?tab=activity` : "/staff/clients", tone: "warn" as const };
+      return { id: `profile-${r.id}`, label: "Client asked to update contact details", detail: "Review and update the client record", count: 1, href: r.entityType === "client" ? `/crm/clients/${r.entityId}?tab=activity` : "/crm/clients", tone: "warn" as const };
     }
     if (r.type === "assignment") {
       return { id: `assign-${r.id}`, label: `You were assigned to ${title}`, detail: r.actorName ? `By ${r.actorName}` : r.entityType === "task" ? "Task" : "Engagement team", count: 1, href, tone: "info" as const };

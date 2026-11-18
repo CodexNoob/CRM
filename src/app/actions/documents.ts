@@ -26,14 +26,14 @@ const str = (fd: FormData, k: string) => {
 };
 
 function refreshStaff(clientId?: string) {
-  revalidatePath("/staff/documents", "layout");
-  if (clientId) revalidatePath(`/staff/clients/${clientId}`);
+  revalidatePath("/crm/documents", "layout");
+  if (clientId) revalidatePath(`/crm/clients/${clientId}`);
   revalidatePath("/portal", "layout");
 }
 
 /* ───────── Staff ───────── */
 
-/** Upload from /staff/documents (client chosen in the form; access re-checked by the service). */
+/** Upload from /crm/documents (client chosen in the form; access re-checked by the service). */
 export async function staffDocumentUploadAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const actor = await requireStaffActor();
   const clientId = str(formData, "clientId");

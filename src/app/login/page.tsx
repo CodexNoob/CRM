@@ -9,10 +9,10 @@ import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = { title: "Sign in" };
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ setup?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ setup?: string; reset?: string }> }) {
   const actor = await getCurrentActor();
-  if (actor) redirect(actor.role === "client" ? "/portal" : "/staff");
-  const { setup } = await searchParams;
+  if (actor) redirect(actor.role === "client" ? "/portal" : "/crm");
+  const { setup, reset } = await searchParams;
   const firstRun = !(await hasAnyUsers(getDb()));
 
   return (
@@ -25,6 +25,11 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       {setup === "done" ? (
         <div className="mb-4">
           <Alert tone="success">Your password is set. You can sign in now.</Alert>
+        </div>
+      ) : null}
+      {reset === "done" ? (
+        <div className="mb-4">
+          <Alert tone="success">Your password has been reset. Sign in with your new password.</Alert>
         </div>
       ) : null}
       {firstRun ? (
@@ -45,9 +50,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           Start a free trial
         </Link>
       </p>
-      <p className="mt-6 text-xs text-muted">
-        New client? Use the invitation link your firm sent you. Forgot your password? Contact the firm for a new link.
-      </p>
+      <p className="mt-6 text-xs text-muted">New client? Use the invitation link your firm sent you.</p>
     </main>
   );
 }

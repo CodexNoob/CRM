@@ -50,8 +50,8 @@ export async function staffUploadAction(clientId: string, _prev: ActionState, fo
   } catch (error) {
     return errorState(error);
   }
-  revalidatePath(`/staff/clients/${clientId}`);
-  revalidatePath("/staff/documents");
+  revalidatePath(`/crm/clients/${clientId}`);
+  revalidatePath("/crm/documents");
   return { status: "success", message: "File uploaded." };
 }
 
@@ -62,7 +62,7 @@ export async function setDocumentSharedAction(id: string, shared: boolean, _prev
   } catch (error) {
     return errorState(error);
   }
-  revalidatePath("/staff", "layout");
+  revalidatePath("/crm", "layout");
   return { status: "success" };
 }
 
@@ -73,7 +73,7 @@ export async function archiveDocumentAction(id: string, _prev: ActionState, _for
   } catch (error) {
     return errorState(error);
   }
-  revalidatePath("/staff", "layout");
+  revalidatePath("/crm", "layout");
   return { status: "success" };
 }
 
@@ -99,7 +99,7 @@ export async function staffMessageAction(clientId: string, _prev: ActionState, f
   } catch (error) {
     return errorState(error, formData);
   }
-  revalidatePath("/staff/messages", "layout");
+  revalidatePath("/crm/messages", "layout");
   return { status: "success" };
 }
 
@@ -123,7 +123,7 @@ export async function createAppointmentAction(_prev: ActionState, formData: Form
   } catch (error) {
     return errorState(error, formData);
   }
-  revalidatePath("/staff/calendar");
+  revalidatePath("/crm/calendar");
   return { status: "success", message: "Appointment added." };
 }
 
@@ -134,6 +134,6 @@ export async function cancelAppointmentAction(id: string, _prev: ActionState, _f
   } catch (error) {
     return errorState(error);
   }
-  revalidatePath("/staff/calendar");
+  revalidatePath("/crm/calendar");
   return { status: "success" };
 }

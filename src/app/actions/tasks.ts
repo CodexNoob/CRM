@@ -32,11 +32,11 @@ function taskInput(formData: FormData): Record<string, unknown> {
 
 /** Refreshes the task lists, the task page, and its engagement/client pages. */
 async function refreshTask(taskId?: string, link?: { engagementId?: string | null; clientId?: string | null }) {
-  revalidatePath("/staff/tasks", "layout");
-  revalidatePath("/staff");
-  if (taskId) revalidatePath(`/staff/tasks/${taskId}`);
-  if (link?.engagementId) revalidatePath(`/staff/engagements/${link.engagementId}`);
-  if (link?.clientId) revalidatePath(`/staff/clients/${link.clientId}`);
+  revalidatePath("/crm/tasks", "layout");
+  revalidatePath("/crm");
+  if (taskId) revalidatePath(`/crm/tasks/${taskId}`);
+  if (link?.engagementId) revalidatePath(`/crm/engagements/${link.engagementId}`);
+  if (link?.clientId) revalidatePath(`/crm/clients/${link.clientId}`);
 }
 
 /** Looks up the task's links for revalidation; never throws. */
@@ -61,7 +61,7 @@ export async function createTaskAction(_prev: ActionState, formData: FormData): 
   } catch (error) {
     return errorState(error, formData);
   }
-  redirect(`/staff/tasks/${id}`);
+  redirect(`/crm/tasks/${id}`);
 }
 
 /** Subtask from the task page: stays on the parent. */
@@ -206,8 +206,8 @@ export async function saveTemplateAction(templateId: string | null, _prev: Actio
   } catch (error) {
     return errorState(error, formData);
   }
-  revalidatePath("/staff/tasks/templates", "layout");
-  if (!templateId) redirect(`/staff/tasks/templates/${id}`);
+  revalidatePath("/crm/tasks/templates", "layout");
+  if (!templateId) redirect(`/crm/tasks/templates/${id}`);
   return { status: "success", message: "Template saved." };
 }
 
@@ -218,6 +218,6 @@ export async function setTemplateActiveAction(templateId: string, active: boolea
   } catch (error) {
     return errorState(error);
   }
-  revalidatePath("/staff/tasks/templates", "layout");
+  revalidatePath("/crm/tasks/templates", "layout");
   return { status: "success", message: active ? "Template activated." : "Template deactivated." };
 }

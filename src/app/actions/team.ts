@@ -19,7 +19,7 @@ export async function inviteStaffAction(_prev: ActionState, formData: FormData):
   try {
     const actor = await resolveFirmContext(getDb(), signedInActor, String(formData.get("firmId") ?? ""));
     const { token } = await inviteStaff(getDb(), actor, formValues(formData));
-    revalidatePath("/staff/team");
+    revalidatePath("/crm/team");
     return { status: "success", message: `Invitation created. ${LINK_NOTE}`, data: { link: signInLink(token) } };
   } catch (error) {
     return errorState(error, formData);
@@ -45,7 +45,7 @@ export async function setStaffActiveAction(userId: string, active: boolean, firm
   } catch (error) {
     return errorState(error);
   }
-  revalidatePath("/staff/team");
+  revalidatePath("/crm/team");
   return { status: "success" };
 }
 
@@ -57,6 +57,6 @@ export async function changeStaffRoleAction(userId: string, _prev: ActionState, 
   } catch (error) {
     return errorState(error);
   }
-  revalidatePath("/staff/team");
+  revalidatePath("/crm/team");
   return { status: "success", message: "Role updated. They’ll need to sign in again." };
 }

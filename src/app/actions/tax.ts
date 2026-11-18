@@ -21,8 +21,8 @@ import {
   updateTaxReturnPreparationData,
 } from "@/services/tax";
 
-const PREPARATION_PATH = "/staff/tax-preparation";
-const RETURNS_PATH = "/staff/tax-returns";
+const PREPARATION_PATH = "/crm/tax-preparation";
+const RETURNS_PATH = "/crm/tax-returns";
 
 export async function createTaxPreparationCaseAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const actor = await requireStaffActor();

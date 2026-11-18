@@ -125,7 +125,7 @@ export function DocumentList({ docs, staff, showClient }: { docs: DocItem[]; sta
             <div className="flex min-w-0 items-center gap-2.5">
               <FileText className="size-4 shrink-0 text-faint" aria-hidden />
               <div className="min-w-0">
-                <a href={staff ? `/staff/documents/${d.id}` : `/api/documents/${d.id}`} className="block truncate font-medium text-ink hover:text-brand hover:underline">{d.title || d.fileName}</a>
+                <a href={staff ? `/crm/documents/${d.id}` : `/api/documents/${d.id}`} className="block truncate font-medium text-ink hover:text-brand hover:underline">{d.title || d.fileName}</a>
                 <div className="truncate text-[12px] text-muted">
                   {formatBytes(d.sizeBytes)}
                   {d.engagementTitle ? ` · ${d.engagementTitle}` : ""}

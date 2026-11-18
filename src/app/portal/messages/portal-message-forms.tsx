@@ -7,7 +7,7 @@ import { FormMessage, SelectField, SubmitButton, TextField, textareaClass } from
 import { buttonClass } from "@/components/ui";
 import { idleState } from "@/lib/action-state";
 import { ACCEPT_ATTRIBUTE } from "@/lib/file-rules";
-import { CONVERSATION_CATEGORY_LABELS } from "@/app/staff/messages/conversation-labels";
+import { CONVERSATION_CATEGORY_LABELS } from "@/app/crm/messages/conversation-labels";
 
 const categories = Object.entries(CONVERSATION_CATEGORY_LABELS).map(([value, label]) => ({ value, label }));
 

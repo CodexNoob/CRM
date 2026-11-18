@@ -27,10 +27,10 @@ async function attachmentsFrom(formData: FormData): Promise<AttachmentInput[]> {
 }
 
 const refreshStaff = (conversationId?: string, clientId?: string) => {
-  revalidatePath("/staff/messages", "layout");
-  if (conversationId) revalidatePath(`/staff/messages/${conversationId}`);
-  if (clientId) revalidatePath(`/staff/clients/${clientId}`);
-  revalidatePath("/staff", "layout");
+  revalidatePath("/crm/messages", "layout");
+  if (conversationId) revalidatePath(`/crm/messages/${conversationId}`);
+  if (clientId) revalidatePath(`/crm/clients/${clientId}`);
+  revalidatePath("/crm", "layout");
 };
 
 /* ───────── Staff ───────── */
@@ -46,7 +46,7 @@ export async function createConversationAction(_prev: ActionState, formData: For
   } catch (error) {
     return errorState(error, formData);
   }
-  redirect(`/staff/messages/${id}`);
+  redirect(`/crm/messages/${id}`);
 }
 
 export async function staffReplyAction(conversationId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {

@@ -333,6 +333,22 @@ export const invitations = pgTable(
   (t) => [index("invitations_user_id_idx").on(t.userId)],
 ).enableRLS();
 
+/** Single-use, hashed tokens for self-service account password recovery. */
+export const passwordResetTokens = pgTable(
+  "password_reset_tokens",
+  {
+    id: text("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .unique()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("password_reset_tokens_expires_idx").on(t.expiresAt)],
+).enableRLS();
+
 /** Which staff members may work on which client (least privilege for preparers). */
 export const clientAssignments = pgTable(
   "client_assignments",

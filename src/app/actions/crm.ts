@@ -22,10 +22,10 @@ function formInput(formData: FormData, multi: string[] = []): Record<string, unk
   return v;
 }
 
-const refreshLeads = () => revalidatePath("/staff/leads", "layout");
+const refreshLeads = () => revalidatePath("/crm/leads", "layout");
 const refreshClient = (id: string) => {
-  revalidatePath(`/staff/clients/${id}`);
-  revalidatePath("/staff/clients");
+  revalidatePath(`/crm/clients/${id}`);
+  revalidatePath("/crm/clients");
 };
 
 /* ───────── Leads ───────── */
@@ -39,7 +39,7 @@ export async function createLeadAction(_prev: ActionState, formData: FormData): 
     return errorState(error, formData);
   }
   refreshLeads();
-  redirect(`/staff/leads/${id}`);
+  redirect(`/crm/leads/${id}`);
 }
 
 export async function updateLeadAction(id: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -101,7 +101,7 @@ export async function convertLeadAction(id: string, _prev: ActionState, formData
   refreshLeads();
   refreshClient(clientId);
   // Next step is up to the user: the client page offers "New engagement".
-  redirect(`/staff/clients/${clientId}?converted=1`);
+  redirect(`/crm/clients/${clientId}?converted=1`);
 }
 
 export async function archiveLeadAction(id: string, archived: boolean): Promise<ActionState> {

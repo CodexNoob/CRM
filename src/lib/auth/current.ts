@@ -34,14 +34,14 @@ export async function requireStaffActor(opts: { allowLocked?: boolean } = {}): P
   const actor = await getCurrentActor();
   if (!actor) redirect("/login");
   if (actor.role === "client") redirect("/portal");
-  if (actor.role !== "super_admin" && !opts.allowLocked && (await getCurrentFirmAccess(actor.firmId)).locked) redirect("/staff");
+  if (actor.role !== "super_admin" && !opts.allowLocked && (await getCurrentFirmAccess(actor.firmId)).locked) redirect("/crm");
   return actor;
 }
 
 export async function requireClientActor(): Promise<Actor> {
   const actor = await getCurrentActor();
   if (!actor) redirect("/login");
-  if (actor.role !== "client") redirect("/staff");
+  if (actor.role !== "client") redirect("/crm");
   return actor;
 }
 

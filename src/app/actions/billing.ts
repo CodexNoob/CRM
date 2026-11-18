@@ -31,8 +31,8 @@ export async function startFirmCheckoutAction(interval: "month" | "year", _prev:
   try {
     const base = appBase();
     url = await startFirmCheckout(getDb(), actor, interval, {
-      returnUrl: `${base}/staff?subscription=1&subscribed=1`,
-      cancelUrl: `${base}/staff?subscription=1&subscribed=0`,
+      returnUrl: `${base}/crm?subscription=1&subscribed=1`,
+      cancelUrl: `${base}/crm?subscription=1&subscribed=0`,
     });
   } catch (error) {
     return errorState(error);
@@ -44,7 +44,7 @@ export async function startFirmCheckoutAction(interval: "month" | "year", _prev:
 export async function refreshFirmBillingAction(): Promise<void> {
   const actor = await requireStaffActor({ allowLocked: true });
   await syncFirmBilling(getDb(), actor.firmId, { force: true });
-  revalidatePath("/staff", "layout");
+  revalidatePath("/crm", "layout");
 }
 
 export async function cancelFirmSubscriptionAction(_prev: ActionState, _formData: FormData): Promise<ActionState> {
@@ -52,10 +52,10 @@ export async function cancelFirmSubscriptionAction(_prev: ActionState, _formData
   try {
     await cancelFirmSubscription(getDb(), actor);
   } catch (error) {
-    revalidatePath("/staff", "layout");
+    revalidatePath("/crm", "layout");
     return errorState(error);
   }
-  revalidatePath("/staff", "layout");
+  revalidatePath("/crm", "layout");
   return { status: "success", message: "PayPal renewal is cancelled. Any paid access remains available until its end date." };
 }
 
@@ -66,7 +66,7 @@ export async function cancelPendingFirmCheckoutAction(): Promise<ActionState> {
   } catch (error) {
     return errorState(error);
   }
-  revalidatePath("/staff", "layout");
+  revalidatePath("/crm", "layout");
   return { status: "success", message: "Pending PayPal checkout cancelled." };
 }
 
@@ -107,5 +107,5 @@ export async function signUpAction(_prev: ActionState, formData: FormData): Prom
     // errorState never echoes passwords back.
     return errorState(error, formData);
   }
-  redirect("/staff?welcome=1");
+  redirect("/crm?welcome=1");
 }
