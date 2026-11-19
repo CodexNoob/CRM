@@ -62,7 +62,7 @@ export default async function ProductHome() {
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-surface focus:px-3 focus:py-2">
         Skip to content
       </a>
-      <header className="sticky top-0 z-30 border-b border-line bg-surface/90 backdrop-blur supports-backdrop-filter:bg-surface/75">
+      <header className="sticky top-0 z-30 border-b border-white/60 bg-white/80 backdrop-blur-xl supports-backdrop-filter:bg-white/70">
         <div className="mx-auto flex h-16 max-w-6xl items-center gap-4 px-4">
           <Link href="/" className="flex items-center gap-2 font-semibold text-ink">
             {profile.logoDataUrl ? (
@@ -87,31 +87,50 @@ export default async function ProductHome() {
         </div>
       </header>
 
-      <main id="main">
-        <section className="mx-auto max-w-6xl px-4 py-16 text-center sm:py-24">
-          <p className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1 text-xs font-medium text-muted">
-            <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden />
-            {product.trialDays}-day free trial · no card required
-          </p>
-          <h1 className="mx-auto mt-5 max-w-3xl text-4xl font-semibold tracking-tight text-ink sm:text-5xl">{product.tagline}</h1>
-          <p className="mx-auto mt-5 max-w-2xl text-lg text-muted">{profile.description}</p>
-          <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
-            <Link href="/signup" className={buttonClass("primary", "min-h-12 px-6 text-base")}>Start your free trial</Link>
-            <a href="#pricing" className={buttonClass("secondary", "min-h-12 px-6 text-base")}>See pricing</a>
+      <main id="main" className="overflow-hidden bg-[#f7f9fc]">
+        <section className="relative isolate overflow-hidden border-b border-slate-200/70 bg-[#eef4fb]">
+          <div aria-hidden className="crm-hero-art absolute inset-0 z-0" />
+          <div aria-hidden className="crm-hero-glow absolute -right-24 top-8 z-0 size-136 rounded-full bg-cyan-300/25 blur-3xl" />
+          <div className="relative z-10 mx-auto grid min-h-170 max-w-360 items-center gap-12 px-5 py-16 sm:px-8 sm:py-24 lg:grid-cols-[0.72fr_1.28fr] lg:gap-7 lg:py-24">
+            <div className="crm-enter relative z-10 max-w-xl">
+              <p className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/75 px-3.5 py-1.5 text-xs font-semibold tracking-wide text-slate-700 shadow-sm backdrop-blur"><span className="size-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.12)]" aria-hidden />MADE FOR MODERN ACCOUNTING FIRMS</p>
+              <h1 className="mt-6 max-w-2xl text-5xl font-semibold leading-[1.04] tracking-[-0.045em] text-slate-950 sm:text-6xl lg:text-[4.4rem]">{product.tagline}</h1>
+              <p className="mt-6 max-w-lg text-lg leading-8 text-slate-600">{profile.description}</p>
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row"><Link href="/signup" className={buttonClass("primary", "min-h-12 px-6 text-base shadow-lg shadow-blue-950/15 transition duration-200 hover:-translate-y-0.5 hover:shadow-xl")}>Start your free trial <span aria-hidden>→</span></Link><a href="#features" className="inline-flex min-h-12 items-center justify-center rounded-lg border border-slate-300/80 bg-white/70 px-6 text-sm font-semibold text-slate-800 shadow-sm backdrop-blur transition hover:-translate-y-0.5 hover:bg-white">Explore the platform</a></div>
+              <p className="mt-4 text-xs font-medium text-slate-500">{product.trialDays} days free <span className="mx-1.5">·</span> No credit card required <span className="mx-1.5">·</span> Setup in minutes</p>
+              <div className="mt-10 flex items-center gap-4 border-t border-slate-300/60 pt-6"><div className="flex -space-x-2" aria-hidden><span className="flex size-9 items-center justify-center rounded-full border-2 border-[#eef4fb] bg-blue-900 text-xs font-bold text-white">A</span><span className="flex size-9 items-center justify-center rounded-full border-2 border-[#eef4fb] bg-teal-700 text-xs font-bold text-white">M</span><span className="flex size-9 items-center justify-center rounded-full border-2 border-[#eef4fb] bg-amber-600 text-xs font-bold text-white">J</span></div><p className="text-xs leading-5 text-slate-600"><span className="block font-semibold text-slate-800">Your whole practice, in sync</span>Clients, work, documents and billing together.</p></div>
+            </div>
+            <div className="crm-enter crm-enter-delay relative mx-auto w-full max-w-none lg:ml-auto lg:scale-[1.1] lg:origin-left">
+              <div aria-hidden className="absolute -inset-8 rounded-[2.5rem] bg-linear-to-br from-blue-300/35 via-indigo-200/25 to-cyan-200/40 blur-2xl" />
+              <div className="crm-float relative overflow-hidden rounded-xl border border-white/80 bg-white p-2 shadow-[0_32px_90px_-35px_rgba(25,54,92,0.45)] sm:rounded-2xl sm:p-3">
+                <Image
+                  src="/crm-dashboard-screenshot-v2.png"
+                  alt="Personal CRM dashboard showing the workspace, client overview, upcoming deadlines, and lead pipeline"
+                  width={1208}
+                  height={733}
+                  priority
+                  className="h-auto w-full rounded-lg border border-slate-200/80 shadow-sm sm:rounded-xl"
+                />
+              </div>
+              <div className="crm-float absolute -left-5 bottom-10 hidden items-center gap-2 rounded-xl border border-white bg-white/95 p-3 shadow-xl backdrop-blur sm:flex"><span className="flex size-8 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">✓</span><span className="text-[10px] font-semibold text-slate-800">Client work, on track</span></div>
+              <div className="crm-float crm-float-late absolute right-10 top-10 hidden rounded-xl border border-white bg-white/95 p-3 shadow-xl backdrop-blur sm:block"><p className="text-[9px] text-slate-500">Your workspace</p><p className="mt-1 text-sm font-semibold text-slate-900">Everything in sync</p></div>
+            </div>
           </div>
+          <div className="absolute inset-x-0 bottom-0 h-20 bg-linear-to-t from-[#f7f9fc] to-transparent" aria-hidden />
         </section>
 
-        <section id="features" className="scroll-mt-20 border-y border-line bg-surface py-16 sm:py-20">
+        <section id="features" className="scroll-mt-20 border-y border-slate-200/80 bg-white py-20 sm:py-28">
           <div className="mx-auto max-w-6xl px-4">
             <div className="mx-auto mb-10 max-w-2xl text-center">
-              <p className="text-sm font-semibold uppercase tracking-wider text-brand-ink">Features</p>
-              <h2 className="mt-2 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">Run the whole practice from one place</h2>
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-800">One connected workspace</p>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">Run the whole practice from one place</h2>
             </div>
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {product.features.map((f) => (
-                <article key={f.title} className="rounded-xl border border-line bg-page p-6">
-                  <h3 className="text-lg font-semibold text-ink">{f.title}</h3>
-                  <p className="mt-1.5 text-sm text-muted">{f.body}</p>
+                <article key={f.title} className="group rounded-2xl border border-slate-200/80 bg-linear-to-br from-white to-slate-50 p-6 shadow-sm transition duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-xl hover:shadow-blue-950/5">
+                  <span className="mb-5 flex size-10 items-center justify-center rounded-xl bg-blue-50 text-lg text-blue-800 transition group-hover:bg-blue-900 group-hover:text-white">✦</span>
+                  <h3 className="text-lg font-semibold text-slate-900">{f.title}</h3>
+                  <p className="mt-1.5 text-sm leading-6 text-slate-600">{f.body}</p>
                 </article>
               ))}
             </div>
@@ -174,7 +193,12 @@ export default async function ProductHome() {
         </section>
 
         <ContactSection
-          profile={profile}
+          profile={{
+            ...profile,
+            officialEmail: profile.officialEmail || "charlesjohnduot@gmail.com",
+            phone: profile.phone || "09197621060",
+            addressLine1: profile.addressLine1 || "Rodriguez Rizal, Philippines",
+          }}
           title="Contact us"
           intro={`Questions about ${profile.name}, pricing or setting up your firm? Send us a message and we’ll get back to you within one business day, or reach us directly.`}
         />
