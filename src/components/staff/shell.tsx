@@ -33,7 +33,7 @@ export interface ShellProps {
   badges: Record<string, number>;
   initialCollapsed: boolean;
   workspace: { name: string; initials: string; logoDataUrl?: string | null };
-  user: { name: string; email: string; roleLabel: string; isAdmin: boolean };
+  user: { name: string; email: string; roleLabel: string; isAdmin: boolean; isOwner: boolean };
   notifications: { id: string; label: string; detail: string; count: number; href: string; tone: "danger" | "warn" | "info" }[];
   children: ReactNode;
 }
@@ -185,7 +185,7 @@ function UserMenu({ user, compact }: { user: ShellProps["user"]; compact?: boole
         items={[
           { type: "label", label: user.email },
           { label: "Dashboard", href: "/crm" },
-          ...(user.isAdmin
+          ...(user.isOwner
             ? [
                 { label: "Subscription", icon: <CreditCard />, href: `${pathname}?subscription=1` },
                 { label: "Settings", icon: <Settings />, href: "/crm/settings" },

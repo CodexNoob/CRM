@@ -1,7 +1,7 @@
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { users, type UserRole } from "@/db/schema";
-import type { Actor } from "@/lib/auth/actor";
+import { canManageTeam, isOwner, type Actor } from "@/lib/auth/actor";
 import { invalidateUserSessions } from "@/lib/auth/sessions";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { isUuid, parseInput, staffInviteSchema, staffRoleSchema } from "@/lib/validation";
@@ -12,7 +12,7 @@ import { createStaffInvitation, findUserByEmail, issueInvitation } from "./users
 /** Staff account management. Admin only; every rule is enforced here, not in the UI. */
 
 function requireAdmin(actor: Actor): void {
-  if (actor.role !== "admin" && actor.role !== "super_admin") throw new ForbiddenError();
+  if (!canManageTeam(actor)) throw new ForbiddenError();
 }
 
 export interface TeamMember {
@@ -51,9 +51,11 @@ export async function listTeam(db: Db, actor: Actor): Promise<TeamMember[]> {
 export async function inviteStaff(db: Db, actor: Actor, input: unknown): Promise<{ token: string; userId: string }> {
   requireAdmin(actor);
   const data = parseInput(staffInviteSchema, input);
+  if (actor.role === "administrator" && data.role === "administrator") throw new ForbiddenError("Only the Owner can assign the Administrator role.");
+  if (data.role === "admin") throw new ValidationError({ role: ["The Owner role is reserved for the account that created the firm."] });
   if (data.role === "super_admin" && actor.role !== "super_admin") throw new ForbiddenError();
   if (await findUserByEmail(db, data.email)) {
-    throw new ValidationError({ email: ["Someone already has an account with this email. Use “New sign-in link” on their row instead."] });
+    throw new ValidationError({ email: ["Someone already has an account with this email. Use the send password setup email action on their row instead."] });
   }
   return createStaffInvitation(db, actor.firmId, data, actor);
 }
@@ -76,18 +78,18 @@ async function otherActiveAdmins(db: Db, firmId: string, excludeUserId: string):
 }
 
 /** New one-time sign-in link for a staff member. Also serves as a password reset. */
-export async function sendStaffSignInLink(db: Db, actor: Actor, userId: string): Promise<{ token: string }> {
+export async function sendStaffSignInLink(db: Db, actor: Actor, userId: string): Promise<{ token: string; name: string; email: string }> {
   const user = await loadStaffTarget(db, actor, userId);
   if (!user.isActive) throw new ValidationError({ _form: ["Reactivate this account before sending a sign-in link."] });
   const token = await issueInvitation(db, user.id, actor.userId);
   await recordAudit(db, { firmId: actor.firmId, actorUserId: actor.userId, action: "staff.signin_link", entityType: "user", entityId: user.id });
-  return { token };
+  return { token, name: user.name, email: user.email };
 }
 
 export async function setStaffActive(db: Db, actor: Actor, userId: string, active: boolean): Promise<void> {
   const user = await loadStaffTarget(db, actor, userId);
-  if (user.id === actor.userId) throw new ValidationError({ _form: ["You can’t deactivate your own account."] });
-  if (!active && user.role === "admin" && (await otherActiveAdmins(db, actor.firmId, user.id)) === 0) {
+  if (user.id === actor.userId) throw new ValidationError({ _form: ["You cannot deactivate your own account."] });
+  if (!active && isOwner({ role: user.role }) && (await otherActiveAdmins(db, actor.firmId, user.id)) === 0) {
     throw new ValidationError({ _form: ["The firm needs at least one active admin."] });
   }
   if (user.isActive === active) return;
@@ -105,12 +107,11 @@ export async function setStaffActive(db: Db, actor: Actor, userId: string, activ
 export async function changeStaffRole(db: Db, actor: Actor, userId: string, role: unknown): Promise<void> {
   const user = await loadStaffTarget(db, actor, userId);
   const next = parseInput(staffRoleSchema, role);
+  if (next === "admin" || isOwner({ role: user.role })) throw new ValidationError({ role: ["The firm Owner role cannot be assigned or changed here."] });
   if (next === "super_admin" && actor.role !== "super_admin") throw new ForbiddenError();
-  if (user.id === actor.userId) throw new ValidationError({ _form: ["You can’t change your own role."] });
+  if (actor.role === "administrator" && next === "administrator") throw new ForbiddenError("Only the Owner can assign the Administrator role.");
+  if (user.id === actor.userId) throw new ValidationError({ _form: ["You cannot change your own role."] });
   if (user.role === next) return;
-  if (user.role === "admin" && user.isActive && (await otherActiveAdmins(db, actor.firmId, user.id)) === 0) {
-    throw new ValidationError({ _form: ["The firm needs at least one active admin."] });
-  }
   await db.update(users).set({ role: next, updatedAt: new Date() }).where(and(eq(users.id, user.id), inFirm(users.firmId, actor)));
   // Permissions change immediately: force a fresh sign-in.
   await invalidateUserSessions(db, user.id);

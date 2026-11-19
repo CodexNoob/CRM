@@ -12,7 +12,7 @@ const LIVE_STATUSES: SubscriptionStatus[] = ["pending", "active", "suspended"];
 
 function requireBillingManager(actor: Actor) {
   requirePermission(actor, "billing", "edit");
-  if (actor.role !== "admin" && actor.role !== "manager" && actor.role !== "super_admin") {
+  if (!["admin", "administrator", "operations_manager", "manager", "project_manager", "finance_manager", "super_admin"].some((role) => role === actor.role)) {
     throw new ForbiddenError("Only an admin or manager can cancel invoice schedules.");
   }
 }

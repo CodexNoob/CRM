@@ -23,14 +23,14 @@ export default async function SignatureRequestPage({ params, searchParams }: { p
   if (!can(actor, "esignatures", "view")) notFound();
   const provider = dropboxSignProvider();
   const state = signatureModuleState(provider);
-  if (state === "setup_required") return <SetupRequired isAdmin={actor.role === "admin"} />;
-  if (state === "testing" && actor.role !== "admin") notFound();
+  if (state === "setup_required") return <SetupRequired isAdmin={actor.role === "admin" || actor.role === "administrator"} />;
+  if (state === "testing" && actor.role !== "admin" && actor.role !== "administrator") notFound();
   const { id } = await params;
   const { created } = await searchParams;
   const d = await orNotFound(getSignatureRequest(getDb(), actor, id));
   const r = d.request;
   const status = SIGNATURE_STATUS[r.status] ?? { label: r.status, tone: "neutral" as const };
-  const canSend = r.status === "draft" && can(actor, "esignatures", "send") && (state === "enabled" || actor.role === "admin");
+  const canSend = r.status === "draft" && can(actor, "esignatures", "send") && (state === "enabled" || actor.role === "admin" || actor.role === "administrator");
   const canVoid = ["draft", "sent", "viewed", "partially_signed"].includes(r.status) && can(actor, "esignatures", "void");
   const willTest = state !== "enabled" || provider.testMode;
 

@@ -40,7 +40,11 @@ const returnPreparer = alias(users, "tax_return_preparer");
 const returnReviewer = alias(users, "tax_return_reviewer");
 
 function isWorkRole(role: string) {
-  return role === "admin" || role === "manager" || role === "employee";
+  return ["admin", "administrator", "operations_manager", "project_manager", "team_member", "finance_manager", "accountant", "manager", "employee"].some((value) => value === role);
+}
+
+function isScopedTaxWorker(role: string) {
+  return ["employee", "team_member", "accountant"].some((value) => value === role);
 }
 
 async function validateAssignee(db: Db, actor: Actor, userId: string, field: string) {
@@ -77,7 +81,7 @@ async function loadPreparationCase(db: Db, actor: Actor, id: string) {
     .limit(1);
   if (!row) throw new NotFoundError();
   await assertClientAccess(db, actor, row.preparationCase.clientId);
-  if (actor.role === "employee" && row.preparationCase.preparerId !== actor.userId && row.preparationCase.reviewerId !== actor.userId) {
+  if (isScopedTaxWorker(actor.role) && row.preparationCase.preparerId !== actor.userId && row.preparationCase.reviewerId !== actor.userId) {
     throw new NotFoundError();
   }
   return row;
@@ -103,7 +107,7 @@ async function loadTaxReturn(db: Db, actor: Actor, id: string) {
     .limit(1);
   if (!row) throw new NotFoundError();
   await assertClientAccess(db, actor, row.taxReturn.clientId);
-  if (actor.role === "employee" && row.taxReturn.preparerId !== actor.userId && row.taxReturn.reviewerId !== actor.userId) {
+  if (isScopedTaxWorker(actor.role) && row.taxReturn.preparerId !== actor.userId && row.taxReturn.reviewerId !== actor.userId) {
     throw new NotFoundError();
   }
   return row;
@@ -111,7 +115,7 @@ async function loadTaxReturn(db: Db, actor: Actor, id: string) {
 
 function requireAssignedReviewer(actor: Actor, reviewerId: string | null) {
   requirePermission(actor, "tax_returns", "approve");
-  if (actor.role === "employee" && reviewerId !== actor.userId) throw new NotFoundError();
+  if (isScopedTaxWorker(actor.role) && reviewerId !== actor.userId) throw new NotFoundError();
 }
 
 async function requiredDocumentsComplete(db: Db, firmId: string, caseId: string) {
@@ -216,7 +220,7 @@ export async function listTaxPreparationCases(
   const conditions = [
     inFirm(taxPreparationCases.firmId, actor),
     visibleClientsCondition(db, actor),
-    actor.role === "employee"
+    isScopedTaxWorker(actor.role)
       ? or(eq(taxPreparationCases.preparerId, actor.userId), eq(taxPreparationCases.reviewerId, actor.userId))
       : undefined,
     filters.mine ? or(eq(taxPreparationCases.preparerId, actor.userId), eq(taxPreparationCases.reviewerId, actor.userId)) : undefined,
@@ -605,7 +609,7 @@ export async function listTaxReturns(
   const conditions = [
     inFirm(taxReturns.firmId, actor),
     visibleClientsCondition(db, actor),
-    actor.role === "employee" ? or(eq(taxReturns.preparerId, actor.userId), eq(taxReturns.reviewerId, actor.userId)) : undefined,
+    isScopedTaxWorker(actor.role) ? or(eq(taxReturns.preparerId, actor.userId), eq(taxReturns.reviewerId, actor.userId)) : undefined,
     filters.status ? eq(taxReturns.status, filters.status) : undefined,
     filters.clientId ? eq(taxReturns.clientId, filters.clientId) : undefined,
     filters.taxYear ? eq(taxReturns.taxYear, filters.taxYear) : undefined,

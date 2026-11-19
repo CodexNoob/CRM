@@ -101,7 +101,7 @@ export async function createPortalInvitation(
 }
 
 /**
- * Creates a staff user of `firmId` and an invitation. Used by Team (admin) and the admin CLI
+ * Creates a staff user of `firmId` and an invitation. Used by Team (Owner/Administrator) and the admin CLI
  * (actor = null). An actor may only invite into their own firm.
  */
 export async function createStaffInvitation(
@@ -110,7 +110,7 @@ export async function createStaffInvitation(
   input: { email: string; name: string; role: StaffRole },
   actor: Actor | null,
 ): Promise<{ token: string; userId: string }> {
-  if (actor && (actor.role !== "admin" || actor.firmId !== firmId)) throw new ForbiddenError();
+  if (actor && ((actor.role !== "admin" && actor.role !== "administrator") || actor.firmId !== firmId)) throw new ForbiddenError();
   const email = input.email.trim().toLowerCase();
   const existing = await findUserByEmail(db, email);
   // Emails are unique across the whole service; don't reveal which firm (if any other) uses it.
@@ -145,11 +145,11 @@ export async function createStaffInvitation(
 }
 
 /** Sets the password for an invited user. The token can be used once. */
-export async function acceptInvitation(db: Db, token: string, password: unknown, now = new Date()): Promise<void> {
+export async function acceptInvitation(db: Db, token: string, password: unknown, now = new Date()): Promise<{ userId: string; role: User["role"] }> {
   if (typeof token !== "string" || token.length < 20 || token.length > 200) throw new InvalidInvitationError();
   const pw = parseInput(passwordSchema.transform((p) => p), password);
   const [invite] = await db
-    .select({ invite: invitations, isActive: users.isActive, firmId: users.firmId })
+    .select({ invite: invitations, isActive: users.isActive, firmId: users.firmId, role: users.role })
     .from(invitations)
     .innerJoin(users, eq(users.id, invitations.userId))
     .where(eq(invitations.id, hashToken(token)))
@@ -180,6 +180,7 @@ export async function acceptInvitation(db: Db, token: string, password: unknown,
     });
   });
   await invalidateUserSessions(db, invite.invite.userId);
+  return { userId: invite.invite.userId, role: invite.role };
 }
 
 /** Portal logins with access to a client (from portal_client_access, so contacts of several clients appear on each). */

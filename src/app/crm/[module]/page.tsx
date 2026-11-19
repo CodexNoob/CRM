@@ -20,7 +20,7 @@ export async function generateMetadata({ params }: { params: Promise<{ module: s
 export default async function PlannedModulePage({ params }: { params: Promise<{ module: string }> }) {
   const actor = await requireStaffActor();
   const entry = findPlanned((await params).module);
-  if (!entry || (entry.adminOnly && actor.role !== "admin" && actor.role !== "super_admin") || (entry.module && !can(actor, entry.module, "view"))) notFound();
+  if (!entry || (entry.adminOnly && actor.role !== "admin" && actor.role !== "administrator" && actor.role !== "super_admin") || (entry.module && !can(actor, entry.module, "view"))) notFound();
   const capabilities = entry.summary.split(",").map((s) => s.trim()).filter(Boolean);
 
   return (

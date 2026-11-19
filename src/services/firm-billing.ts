@@ -5,7 +5,7 @@ import { firms, paypalWebhookEvents, platformPlans, type Firm } from "@/db/schem
 import * as paypal from "@/integrations/paypal";
 import type { PayPalSubscriptionSnapshot, PayPalSubscriptionStatus } from "@/integrations/paypal";
 import { product, type PlanInterval } from "@/content/product";
-import type { Actor } from "@/lib/auth/actor";
+import { isOwner, type Actor } from "@/lib/auth/actor";
 import { ForbiddenError, IntegrationNotConfiguredError, ValidationError } from "@/lib/errors";
 import { recordAudit } from "./audit";
 import { getFirm } from "./firms";
@@ -69,7 +69,7 @@ export function trialEndsAt(now = new Date()): Date {
 }
 
 function requireFirmAdmin(actor: Actor) {
-  if (actor.role !== "admin") throw new ForbiddenError("Only a firm admin can manage the subscription.");
+  if (!isOwner(actor)) throw new ForbiddenError("Only the firm Owner can manage the subscription.");
 }
 
 function requireCheckoutReady(provider: PayPalSubscriptionProvider) {
@@ -298,11 +298,12 @@ export async function getBillingOverview(
   provider: PayPalSubscriptionProvider = paypalSubscriptions(),
   now = new Date(),
 ): Promise<BillingOverview> {
+  if (!isOwner(actor)) throw new ForbiddenError("Only the firm Owner can access billing.");
   const firm = await syncFirmBilling(db, actor.firmId, opts, provider, now);
   return {
     firm,
     access: firmAccess(firm, now),
-    canManage: actor.role === "admin",
+    canManage: isOwner(actor),
     paypalReady: provider.isConfigured && provider.isWebhookConfigured,
     paypalSetupMessage: !provider.isConfigured
       ? provider.configurationMessage ?? "Configure the PayPal API credentials for this environment."

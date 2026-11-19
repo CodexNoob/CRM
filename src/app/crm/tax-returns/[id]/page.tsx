@@ -37,7 +37,7 @@ export default async function TaxReturnDetailPage({
     listTaxReturnDocuments(db, actor, r.id),
     listEntityTimeline(db, actor, "tax_return", r.id),
   ]);
-  const canReview = can(actor, "tax_returns", "approve") && (actor.role !== "employee" || r.reviewerId === actor.userId);
+  const canReview = can(actor, "tax_returns", "approve") && (!["employee", "team_member", "accountant"].some((role) => role === actor.role) || r.reviewerId === actor.userId);
   const canFile = can(actor, "tax_returns", "file");
 
   return (

@@ -9,7 +9,7 @@ export default async function SetupPasswordPage({ searchParams }: { searchParams
   return (
     <main className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-4 py-10">
       <h1 className="text-2xl font-semibold tracking-tight">Set your password</h1>
-      <p className="mt-1 mb-6 text-sm text-muted">Choose a password of at least 12 characters. A short phrase works well.</p>
+      <p className="mt-1 mb-6 text-sm text-muted">Choose a password of at least 12 characters. A short phrase works well. Client portal invitations take you straight into the portal after setup.</p>
       {token ? (
         <SetupPasswordForm token={token} />
       ) : (

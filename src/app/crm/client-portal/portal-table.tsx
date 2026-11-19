@@ -95,7 +95,7 @@ export function PortalAccessTable({ rows, clients, perms }: { rows: PortalAccess
         ]}
         rowActions={(r) => [
           { label: "Open client", icon: <Users />, href: `/crm/clients/${r.clientId}` },
-          ...(perms.invite && r.isActive ? [{ label: r.hasPassword ? "New sign-in link" : "Re-send invitation link", icon: <KeyRound />, onSelect: () => run(reissuePortalLinkAction(r.userId, r.clientId)) }] : []),
+          ...(perms.invite && r.isActive ? [{ label: r.hasPassword ? "Issue password setup link" : "Resend invitation link", icon: <KeyRound />, onSelect: () => run(reissuePortalLinkAction(r.userId, r.clientId)) }] : []),
           ...(perms.manageAccess ? [{ label: "Give access to another client", icon: <UserPlus />, onSelect: () => setGrantFor(r) }] : []),
           ...(perms.suspend
             ? r.status === "active"
@@ -117,7 +117,7 @@ export function PortalAccessTable({ rows, clients, perms }: { rows: PortalAccess
         empty={{ title: "No portal access yet", body: perms.invite ? "Invite a client contact with “Invite contact”." : "Ask an admin or manager to invite client contacts.", icon: <MonitorSmartphone /> }}
       />
 
-      <Dialog open={!!link} onClose={() => setLink(null)} title="One-time sign-in link" description="Send it through a trusted channel (not a public chat). It works once and expires in 72 hours.">
+      <Dialog open={!!link} onClose={() => setLink(null)} title="One-time password setup link" description="The client can use this link once to set or reset their password. Client accounts go straight to the portal afterward. It expires in 72 hours; share it through a trusted channel.">
         {link ? <InviteLink link={link} id="portal-reissue-link" /> : null}
       </Dialog>
 
@@ -174,7 +174,7 @@ export function InviteContactButton({ clients }: { clients: { id: string; name: 
           setKey((k) => k + 1);
         }}
         title="Invite a client contact"
-        description="Creates a portal login (or adds this client to an existing one) and a one-time link to set a password."
+        description="Create a portal login or add a client to an existing one. Then share a one-time password link; after setup, the client is signed in to the portal."
       >
         <InviteForm key={key} clients={clients} />
       </Dialog>
@@ -189,6 +189,7 @@ function InviteForm({ clients }: { clients: { id: string; name: string }[] }) {
     return (
       <div className="space-y-3">
         <FormMessage state={state} />
+        <p className="text-sm text-muted">Copy this private link and send it directly to the client. It works once and expires in 72 hours.</p>
         <InviteLink link={state.data.link} id="portal-invite-link" />
         <button type="button" className={buttonClass("ghost", "w-full")} onClick={() => router.refresh()}>
           Done

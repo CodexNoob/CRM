@@ -2,8 +2,10 @@
 
 import { useActionState, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { FilePlus2 } from "lucide-react";
 import { createSignatureDraftAction, sendSignatureAction, voidSignatureAction } from "@/app/actions/esignatures";
 import { DataTable } from "@/components/data-table";
+import { Dialog } from "@/components/dialog";
 import { FormMessage, inputClass, SelectField, SubmitButton, TextField, textareaClass } from "@/components/form";
 import { useToast } from "@/components/toast";
 import { Badge, buttonClass, cx, type Tone } from "@/components/ui";
@@ -48,7 +50,7 @@ export interface SignatureListRow {
   signedCount: number;
 }
 
-const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—");
+const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Ã¢â‚¬â€");
 
 export function SignatureTable({ rows }: { rows: SignatureListRow[] }) {
   return (
@@ -64,7 +66,7 @@ export function SignatureTable({ rows }: { rows: SignatureListRow[] }) {
         { id: "type", label: "Type", options: Object.entries(DOCUMENT_TYPES).map(([value, label]) => ({ value, label })), match: (r, v) => r.documentType === v },
       ]}
       columns={[
-        { id: "title", header: "Request", sort: (r) => r.title, cell: (r) => <div><p className="font-medium text-ink">{r.title}</p><p className="text-[12px] text-muted">{r.number} · {DOCUMENT_TYPES[r.documentType] ?? r.documentType}</p>{r.status === "failed" ? <p className="mt-1 line-clamp-2 text-[12px] text-danger-ink">Dropbox Sign error: {r.failureReason ?? "No provider detail was returned."}</p> : null}</div> },
+        { id: "title", header: "Request", sort: (r) => r.title, cell: (r) => <div><p className="font-medium text-ink">{r.title}</p><p className="text-[12px] text-muted">{r.number} Ã‚Â· {DOCUMENT_TYPES[r.documentType] ?? r.documentType}</p>{r.status === "failed" ? <p className="mt-1 line-clamp-2 text-[12px] text-danger-ink">Dropbox Sign error: {r.failureReason ?? "No provider detail was returned."}</p> : null}</div> },
         { id: "client", header: "Client", sort: (r) => r.clientName, cell: (r) => r.clientName },
         { id: "status", header: "Status", sort: (r) => r.status, cell: (r) => <span className="flex flex-wrap gap-1"><Badge tone={SIGNATURE_STATUS[r.status]?.tone ?? "neutral"} dot>{SIGNATURE_STATUS[r.status]?.label ?? r.status}</Badge>{r.testMode && r.status !== "draft" ? <Badge tone="warn">Test</Badge> : null}</span> },
         { id: "signers", header: "Signed", sort: (r) => r.signedCount, cell: (r) => <span className="tabular">{r.signedCount} / {r.signerCount}</span> },
@@ -77,7 +79,38 @@ export function SignatureTable({ rows }: { rows: SignatureListRow[] }) {
   );
 }
 
-/** New request: document → client/engagement → signers & order → expiration → review (draft). Sending is a separate step. */
+/** Modal trigger for creating a signature request. */
+export function NewSignatureButton({
+  clients,
+  documents,
+  engagements,
+  canUpload,
+}: {
+  clients: { id: string; name: string }[];
+  documents: { id: string; clientId: string; name: string }[];
+  engagements: { id: string; clientId: string; title: string }[];
+  canUpload: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" className={buttonClass("primary")} onClick={() => setOpen(true)}>
+        <FilePlus2 /> New signature request
+      </button>
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title="New signature request"
+        description="Set up the document, clients and signers. You will review the draft before anything is sent."
+        size="lg"
+      >
+        <NewSignatureForm clients={clients} documents={documents} engagements={engagements} canUpload={canUpload} />
+      </Dialog>
+    </>
+  );
+}
+
+/** Configure the document, client, signers and expiration before saving a draft. */
 export function NewSignatureForm({
   clients,
   documents,
@@ -172,8 +205,8 @@ export function NewSignatureForm({
       <div className="border-t border-line pt-4">
         {(!clientId || docs.length > 0) ? (
           <>
-            <SubmitButton pendingText="Saving…">Save draft and review</SubmitButton>
-            <p className="mt-2 text-[12px] text-muted">Nothing is sent yet — you’ll review the request and send it from the next page.</p>
+            <SubmitButton pendingText="SavingÃ¢â‚¬Â¦">Save draft and review</SubmitButton>
+            <p className="mt-2 text-[12px] text-muted">Nothing is sent yet Ã¢â‚¬â€ youÃ¢â‚¬â„¢ll review the request and send it from the next page.</p>
           </>
         ) : null}
       </div>
@@ -199,7 +232,7 @@ export function SignatureControls({ id, canSend, canVoid, sendLabel, testMode }:
         <button type="button" disabled={pending} onClick={() => run(() => sendSignatureAction(id), testMode
           ? "Send this test request through Dropbox Sign? It is not legally binding."
           : "Send this LIVE request through Dropbox Sign? Signers will receive an invitation and the signatures may be legally binding.")} className={buttonClass("primary")}>
-          {pending ? "Sending…" : sendLabel}
+          {pending ? "SendingÃ¢â‚¬Â¦" : sendLabel}
         </button>
       ) : null}
       {canVoid ? (

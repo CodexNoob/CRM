@@ -35,31 +35,32 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     firmLocked ? 0 : countUnreadForStaff(db, actor),
     firmLocked ? [] : getNotifications(db, actor),
     getOrganizationProfile(db, actor.firmId),
-    getBillingOverview(db, actor),
+    actor.role === "admin" ? getBillingOverview(db, actor) : Promise.resolve(null),
     cookies(),
   ]);
 
-  const { firm } = billing;
-  const interval = firm.paypalSubscriptionId && (firm.billingInterval === "month" || firm.billingInterval === "year")
+  const firm = billing?.firm;
+  const billingAccess = billing?.access ?? access;
+  const interval = firm?.paypalSubscriptionId && (firm.billingInterval === "month" || firm.billingInterval === "year")
     ? firm.billingInterval
     : null;
   const summary: SubscriptionSummary = {
-    state: billing.access.state,
+    state: billingAccess.state,
     locked: firmLocked,
-    trialDaysLeft: billing.access.trialDaysLeft,
-    reason: billing.access.reason,
-    canManage: billing.canManage,
-    paypalReady: billing.paypalReady,
-    paypalSetupMessage: billing.paypalSetupMessage,
-    paying: ((firm.status === "active" || firm.status === "past_due") && !!firm.paypalSubscriptionId)
+    trialDaysLeft: billingAccess.trialDaysLeft,
+    reason: billingAccess.reason,
+    canManage: billing?.canManage ?? false,
+    paypalReady: billing?.paypalReady ?? false,
+    paypalSetupMessage: billing?.paypalSetupMessage ?? null,
+    paying: !!firm && (((firm.status === "active" || firm.status === "past_due") && !!firm.paypalSubscriptionId)
       || (firm.status === "cancelled" && !!firm.paypalSubscriptionId && !!firm.nextBillingAt && firm.nextBillingAt > new Date())
-      || (firm.status === "trial" && !!firm.paypalSubscriptionId),
-    cancelled: firm.status === "cancelled",
-    approvalPending: firm.status === "trial" && !!firm.paypalSubscriptionId,
+      || (firm.status === "trial" && !!firm.paypalSubscriptionId)),
+    cancelled: firm?.status === "cancelled",
+    approvalPending: firm?.status === "trial" && !!firm.paypalSubscriptionId,
     planInterval: interval,
     planLabel: interval ? `${product.plans[interval].label} · ${new Intl.NumberFormat("en-US", { style: "currency", currency: product.currency }).format(product.plans[interval].amountCents / 100)}` : null,
-    trialEndsAt: firm.trialEndsAt?.toISOString() ?? null,
-    nextBillingAt: firm.nextBillingAt?.toISOString() ?? null,
+    trialEndsAt: firm?.trialEndsAt?.toISOString() ?? null,
+    nextBillingAt: firm?.nextBillingAt?.toISOString() ?? null,
   };
 
   return (
@@ -69,14 +70,14 @@ export default async function StaffLayout({ children }: { children: React.ReactN
       badges={{ myOpenTasks, newLeads: leadCounts?.new ?? 0, unreadMessages }}
       initialCollapsed={jar.get("crm_sidebar")?.value === "collapsed"}
       workspace={{ name: profile.name, initials: initials(profile.name), logoDataUrl: profile.logoDataUrl }}
-      user={{ name: actor.name, email: actor.email, roleLabel: ROLE_LABELS[actor.role], isAdmin: actor.role === "admin" || actor.role === "super_admin" }}
+      user={{ name: actor.name, email: actor.email, roleLabel: ROLE_LABELS[actor.role], isAdmin: actor.role === "admin" || actor.role === "administrator" || actor.role === "super_admin", isOwner: actor.role === "admin" }}
       notifications={notifications}
     >
-      {firmLocked ? null : <BillingBanner access={access} isAdmin={actor.role === "admin" || actor.role === "super_admin"} />}
+      {actor.role === "admin" && !firmLocked ? <BillingBanner access={access} isAdmin /> : null}
       {/* While locked, no CRM content renders behind the modal. */}
       {firmLocked ? <div aria-hidden className="min-h-[60vh]" /> : children}
       <Suspense fallback={null}>
-        <SubscriptionModal summary={summary} />
+        {actor.role === "admin" ? <SubscriptionModal summary={summary} /> : null}
       </Suspense>
     </StaffShell>
     </ToastProvider>

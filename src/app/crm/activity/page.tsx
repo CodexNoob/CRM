@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getDb } from "@/db";
 import { PageHeader } from "@/components/ui";
 import { requireStaffActor } from "@/lib/auth/current";
+import { canManageTeam } from "@/lib/auth/actor";
 import { listRecentActivity } from "@/services/audit";
 import { listPlatformFirms, resolveFirmContext } from "@/services/firms";
 import { FirmScopePicker } from "@/components/staff/firm-scope-picker";
@@ -68,7 +69,7 @@ function entityHref(type: string, id: string | null) {
 
 export default async function ActivityPage({ searchParams }: { searchParams: Promise<{ firmId?: string }> }) {
   const actor = await requireStaffActor();
-  if (actor.role !== "admin" && actor.role !== "super_admin") notFound();
+  if (!canManageTeam(actor)) notFound();
   const db = getDb();
   const params = await searchParams;
   const scope = await resolveFirmContext(db, actor, params.firmId);

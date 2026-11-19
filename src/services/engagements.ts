@@ -101,6 +101,7 @@ export async function listEngagements(db: Db, actor: Actor, f: EngagementFilters
   const q = f.q?.trim().slice(0, 100);
   const like = q ? `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : undefined;
   const in30 = f.today ? new Date(Date.parse(`${f.today}T00:00:00Z`) + 30 * 86_400_000).toISOString().slice(0, 10) : undefined;
+  const projection = { ...summarySelect(f.today), feeCents: actor.role === "admin" ? engagements.feeCents : sql<null>`null` };
   const statusCond =
     f.status === "open" || !f.status
       ? notInArray(engagements.status, CLOSED_STATUSES)
@@ -110,7 +111,7 @@ export async function listEngagements(db: Db, actor: Actor, f: EngagementFilters
           ? inArray(engagements.status, [...ENGAGEMENT_DONE])
           : eq(engagements.status, f.status);
   return db
-    .select(summarySelect(f.today))
+    .select(projection)
     .from(engagements)
     .innerJoin(clients, eq(clients.id, engagements.clientId))
     .innerJoin(owner, eq(owner.id, engagements.ownerId))
@@ -144,7 +145,7 @@ export async function listOpenEngagements(db: Db, actor: Actor, opts: { ownedByM
 export async function listClientEngagements(db: Db, actor: Actor, clientId: string): Promise<EngagementSummary[]> {
   await assertClientAccess(db, actor, clientId);
   return db
-    .select(summarySelect())
+    .select({ ...summarySelect(), feeCents: actor.role === "admin" ? engagements.feeCents : sql<null>`null` })
     .from(engagements)
     .innerJoin(clients, eq(clients.id, engagements.clientId))
     .innerJoin(owner, eq(owner.id, engagements.ownerId))
@@ -211,6 +212,10 @@ export async function listEngagementTeam(db: Db, actor: Actor, engagementId: str
 
 export async function getEngagement(db: Db, actor: Actor, engagementId: string, today?: string): Promise<EngagementDetail> {
   const engagement = await loadEngagementForStaff(db, actor, engagementId);
+  if (actor.role !== "admin") {
+    engagement.feeCents = null;
+    engagement.billingFrequency = null;
+  }
   const [names] = await db
     .select({ clientName: clients.displayName, ownerName: owner.name })
     .from(clients)

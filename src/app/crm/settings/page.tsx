@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { SimpleTable, td } from "@/components/table";
 import { Alert, Badge, PageHeader, Panel, TabNav } from "@/components/ui";
 import { requireStaffActor } from "@/lib/auth/current";
+import { canManageTeam } from "@/lib/auth/actor";
 import { FirmScopePicker } from "@/components/staff/firm-scope-picker";
 import { MAX_FAILED_LOGINS, LOCKOUT_MS } from "@/lib/auth/login";
 import { SESSION_ABSOLUTE_MS, SESSION_IDLE_MS } from "@/lib/auth/sessions";
@@ -20,7 +21,7 @@ type Tab = keyof typeof TABS;
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string; firmId?: string }> }) {
   const actor = await requireStaffActor();
-  if (actor.role !== "admin" && actor.role !== "super_admin") notFound();
+  if (!canManageTeam(actor)) notFound();
   const params = await searchParams;
   const requested = params.tab;
   const tab: Tab = requested && requested in TABS ? (requested as Tab) : "profile";
@@ -30,7 +31,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const [profile, list] = await Promise.all([getOrganizationProfile(db, scope.firmId), listAllAnnouncements(db, scope)]);
 
   const security: [string, string, boolean][] = [
-    ["Role-based access", "Super Admin, Admin, Manager, Employee, Read Only and Client roles; permissions are enforced on the server", true],
+    ["Role-based access", "Distinct Owner, Administrator, operations, sales, finance, marketing, client-service and legacy read-only permissions enforced on the server", true],
     ["Session management", `Sessions expire after ${SESSION_IDLE_MS / 3_600_000} h idle and ${SESSION_ABSOLUTE_MS / 3_600_000} h maximum`, true],
     ["Account lockout", `${MAX_FAILED_LOGINS} failed sign-ins lock an account for ${LOCKOUT_MS / 60_000} minutes`, true],
     ["Password storage", "Minimum 12 characters, stored as argon2id hashes", true],

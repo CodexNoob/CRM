@@ -68,3 +68,29 @@ export async function notifyPlatformInquiry(inquiryId: string): Promise<void> {
   });
   if (!result.ok) console.error("Platform inquiry alert email failed", { inquiryId, error: result.error });
 }
+
+/** Sends a one-time staff invitation or password setup link. */
+export function sendStaffInvitationEmail(input: { to: string; name: string; firmName: string; link: string }) {
+  const name = input.name.replace(/[\r\n]+/g, " ").trim().slice(0, 120);
+  const firmName = input.firmName.replace(/[\r\n]+/g, " ").trim().slice(0, 120);
+  return sendEmail({
+    to: input.to,
+    subject: `Invitation to join ${firmName}`,
+    text: [
+      `Hello ${name},`,
+      "",
+      `You have been invited to join the ${firmName} team. Use the one-time link below to set your password and activate your account.`,
+      "The link expires in 72 hours.",
+      "",
+      input.link,
+      "",
+      "If you were not expecting this invitation, you can ignore this email.",
+    ].join("\n"),
+    html: `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#202b38">
+  <p>Hello ${escapeHtml(name)},</p>
+  <p>You have been invited to join the <strong>${escapeHtml(firmName)}</strong> team. Use the one-time link below to set your password and activate your account.</p>
+  <p><a href="${escapeHtml(input.link)}" style="display:inline-block;background:#1f3a56;color:#ffffff;text-decoration:none;padding:10px 16px;border-radius:6px">Accept invitation</a></p>
+  <p style="font-size:13px;color:#6b7280">This link expires in 72 hours. If you were not expecting this invitation, you can ignore this email.</p>
+</div>`,
+  });
+}

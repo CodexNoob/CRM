@@ -3,6 +3,7 @@ import { and, eq, gt } from "drizzle-orm";
 import type { Db } from "@/db";
 import { clients, qboConnections, qboCustomerLinks, qboOAuthStates } from "@/db/schema";
 import type { Actor } from "@/lib/auth/actor";
+import { isOwner } from "@/lib/auth/actor";
 import { ForbiddenError, IntegrationNotConfiguredError, NotFoundError, ValidationError } from "@/lib/errors";
 import {
   authorizationUrl,
@@ -25,7 +26,7 @@ const STATE_TTL_MS = 10 * 60_000;
 const ACCESS_REFRESH_SKEW_MS = 60_000;
 
 export function assertCanManageQbo(actor: Actor, scope: QboScope) {
-  if (actor.role !== "admin" || actor.firmId !== scope.firmId) {
+  if (!isOwner(actor) || actor.firmId !== scope.firmId) {
     throw new ForbiddenError("Only this firm's administrator can manage its QuickBooks connection.");
   }
 }
@@ -162,7 +163,7 @@ export interface QboConnectionView {
 }
 
 export async function getQboClientCustomerLink(db: Db, actor: Actor, clientId: string): Promise<{ customerId: string; displayName: string } | null> {
-  if (actor.role !== "admin" || !clientId) throw new ForbiddenError("Only a firm administrator can view QuickBooks customer matches.");
+  if (!isOwner(actor) || !clientId) throw new ForbiddenError("Only the firm Owner can view QuickBooks customer matches.");
   const [connection] = await db.select({ id: qboConnections.id }).from(qboConnections)
     .where(scopeCondition({ type: "firm", firmId: actor.firmId })).limit(1);
   if (!connection) return null;

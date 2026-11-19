@@ -26,11 +26,14 @@ import {
  */
 
 /**
- * Roles. admin: everything in the firm. manager: all firm records + approvals (formerly "partner").
- * employee: assigned clients/work (formerly "preparer"). read_only: view all firm records, change nothing.
- * client: portal only.
+ * `admin` is the first firm account (Owner). `super_admin` is platform-wide.
+ * Legacy `manager` and `employee` values remain readable for existing accounts.
  */
-export const userRole = pgEnum("user_role", ["super_admin", "admin", "manager", "employee", "read_only", "client"]);
+export const userRole = pgEnum("user_role", [
+  "super_admin", "admin", "administrator", "operations_manager", "project_manager", "team_member",
+  "sales_manager", "sales_representative", "finance_manager", "accountant", "marketing_manager",
+  "account_manager", "support_agent", "developer", "manager", "employee", "read_only", "client",
+]);
 export const clientType = pgEnum("client_type", ["individual", "household", "business"]);
 export const clientStatus = pgEnum("client_status", ["prospect", "onboarding", "active", "inactive", "on_hold", "former"]);
 export const onboardingStatus = pgEnum("onboarding_status", ["not_started", "information_requested", "awaiting_documents", "under_verification", "completed"]);

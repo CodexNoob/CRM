@@ -1,5 +1,6 @@
 import type { NavIconName } from "./icons";
 import type { Actor } from "@/lib/auth/actor";
+import { canManageTeam } from "@/lib/auth/actor";
 import { can, type Module } from "@/lib/auth/permissions";
 
 /**
@@ -94,7 +95,9 @@ export function navForRole(actor: Pick<Actor, "role">): NavSection[] {
   return NAV_SECTIONS.map((s) => ({
     ...s,
     items: s.items.filter((i) =>
-      (!i.adminOnly || actor.role === "admin" || actor.role === "super_admin")
+      (i.module !== "billing" || actor.role === "admin")
+      &&
+      (!i.adminOnly || canManageTeam(actor))
       && (!i.superAdminOnly || actor.role === "super_admin")
       && (!i.module || can(actor, i.module, "view")),
     ),

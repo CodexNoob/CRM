@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { getDb } from "@/db";
 import { errorState, type ActionState } from "@/lib/action-state";
 import { requireStaffActor, setSessionCookie } from "@/lib/auth/current";
-import { IntegrationNotConfiguredError } from "@/lib/errors";
+import { ForbiddenError, IntegrationNotConfiguredError } from "@/lib/errors";
 import { createSession } from "@/lib/auth/sessions";
 import { cancelFirmSubscription, cancelPendingFirmCheckout, startFirmCheckout, syncFirmBilling } from "@/services/firm-billing";
 import { SignupRejectedError, signUpFirm } from "@/services/signup";
@@ -43,6 +43,7 @@ export async function startFirmCheckoutAction(interval: "month" | "year", _prev:
 /** Re-checks the firm's subscription status with PayPal. */
 export async function refreshFirmBillingAction(): Promise<void> {
   const actor = await requireStaffActor({ allowLocked: true });
+  if (actor.role !== "admin") throw new ForbiddenError("Only the firm Owner can access billing.");
   await syncFirmBilling(getDb(), actor.firmId, { force: true });
   revalidatePath("/crm", "layout");
 }

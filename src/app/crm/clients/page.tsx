@@ -35,7 +35,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
     <>
       <PageHeader
         title="Clients"
-        description={actor.role === "employee" ? "Clients assigned to you." : "Every individual, household and business client of the firm."}
+        description={["employee", "team_member", "sales_representative", "account_manager", "support_agent"].some((role) => role === actor.role) ? "Clients assigned to you." : "Every individual, household and business client of the firm."}
         actions={
           canCreate ? (
             <ButtonLink href="/crm/clients/new">

@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getDb } from "@/db";
-import { Alert, Badge, ButtonLink, PageHeader, Panel, StatStrip } from "@/components/ui";
+import { Alert, Badge, PageHeader, Panel, StatStrip } from "@/components/ui";
 import { dropboxSignConfig, dropboxSignProvider } from "@/integrations/dropbox-sign";
 import { requireStaffActor } from "@/lib/auth/current";
 import { can } from "@/lib/auth/permissions";
-import { listSignatureRequests, signatureModuleState } from "@/services/esignatures";
+import { listSignatureFormOptions, listSignatureRequests, signatureModuleState } from "@/services/esignatures";
 import { SetupRequired } from "./setup-required";
-import { SignatureTable } from "./signature-ui";
+import { NewSignatureButton, SignatureTable } from "./signature-ui";
 
 export const metadata: Metadata = { title: "E-Signatures" };
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ export default async function ESignaturesPage() {
   const actor = await requireStaffActor();
   if (!can(actor, "esignatures", "view")) notFound();
   const state = signatureModuleState(dropboxSignProvider());
-  const isAdmin = actor.role === "admin";
+  const isAdmin = actor.role === "admin" || actor.role === "administrator";
 
   if (state === "setup_required") {
     return (
@@ -38,12 +38,13 @@ export default async function ESignaturesPage() {
   const rows = await listSignatureRequests(getDb(), actor);
   const canCreate = can(actor, "esignatures", "create");
   const cfg = dropboxSignConfig();
+  const formOptions = canCreate ? await listSignatureFormOptions(getDb(), actor) : null;
   return (
     <>
       <PageHeader
         title="E-Signatures"
         description="Engagement letters, authorizations and consent forms, signed through Dropbox Sign."
-        actions={canCreate ? <ButtonLink href="/crm/e-signatures/new">New signature request</ButtonLink> : undefined}
+        actions={formOptions ? <NewSignatureButton clients={formOptions.clients} documents={formOptions.documents} engagements={formOptions.engagements} canUpload={can(actor, "documents", "upload")} /> : undefined}
       />
       {state === "testing" ? (
         <div className="mb-4">

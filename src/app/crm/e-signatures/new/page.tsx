@@ -17,8 +17,8 @@ export default async function NewSignaturePage() {
   const actor = await requireStaffActor();
   if (!can(actor, "esignatures", "create")) notFound();
   const state = signatureModuleState(dropboxSignProvider());
-  if (state === "setup_required") return <SetupRequired isAdmin={actor.role === "admin"} />;
-  if (state === "testing" && actor.role !== "admin") notFound();
+  if (state === "setup_required") return <SetupRequired isAdmin={actor.role === "admin" || actor.role === "administrator"} />;
+  if (state === "testing" && actor.role !== "admin" && actor.role !== "administrator") notFound();
   const options = await listSignatureFormOptions(getDb(), actor);
   return (
     <>

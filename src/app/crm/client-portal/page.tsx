@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { KeyRound } from "lucide-react";
 import { getDb } from "@/db";
 import { PageHeader, StatStrip } from "@/components/ui";
 import { requireStaffActor } from "@/lib/auth/current";
@@ -42,6 +43,13 @@ export default async function ClientPortalPage() {
           { label: "Suspended client access", value: suspended, tone: suspended ? "danger" : "default" },
         ]}
       />
+      <div className="mb-5 flex gap-3 rounded-lg border border-info/30 bg-info-soft/60 px-4 py-3">
+        <KeyRound className="mt-0.5 size-4 shrink-0 text-info" aria-hidden />
+        <div>
+          <p className="text-sm font-medium text-ink">How portal invitations work</p>
+          <p className="mt-0.5 text-xs leading-5 text-muted">Create a one-time link and send it privately. It expires after 72 hours; the client sets a password and is signed in to the portal automatically. They can only access clients listed below.</p>
+        </div>
+      </div>
       {canView ? (
         <PortalAccessTable
           rows={rows.map((r) => ({

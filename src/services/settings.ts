@@ -4,6 +4,7 @@ import type { Db } from "@/db";
 import { announcements, firmProfile, firms, platformInquiries, platformSettings } from "@/db/schema";
 import { product } from "@/content/product";
 import type { Actor } from "@/lib/auth/actor";
+import { canManageTeam } from "@/lib/auth/actor";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { isUuid, parseInput } from "@/lib/validation";
 import { inFirm } from "./access";
@@ -135,7 +136,7 @@ export async function getPlatformProfile(db: Db): Promise<PlatformProfile> {
 }
 
 function requireAdmin(actor: Actor) {
-  if (actor.role !== "admin" && actor.role !== "super_admin") throw new ForbiddenError();
+  if (!canManageTeam(actor)) throw new ForbiddenError();
 }
 
 function requireSuperAdmin(actor: Actor) {

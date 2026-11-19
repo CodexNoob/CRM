@@ -159,9 +159,9 @@ export default async function EngagementsPage({ searchParams }: { searchParams: 
       </form>
 
       {board ? (
-        <EngagementBoard rows={rows} today={today} canEdit={canEdit} canApprove={canApprove} />
+        <EngagementBoard rows={rows} today={today} canEdit={canEdit} canApprove={canApprove} canViewBilling={actor.role === "admin"} />
       ) : (
-        <EngagementListTable rows={rows} today={today} canEdit={canEdit} canApprove={canApprove} />
+        <EngagementListTable rows={rows} today={today} canEdit={canEdit} canApprove={canApprove} canViewBilling={actor.role === "admin"} />
       )}
     </>
   );

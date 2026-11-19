@@ -70,7 +70,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
   const db = getDb();
   const actor = await resolveFirmContext(db, signedInActor, sp.firmId);
   const firms = signedInActor.role === "super_admin" ? await listPlatformFirms(db, signedInActor) : [];
-  const canBilling = can(actor, "billing", "view");
+  const canBilling = signedInActor.role === "admin" && can(actor, "billing", "view");
   const tabs = TABS.filter((t) => t !== "billing" || canBilling);
   const tab: Tab = (tabs as readonly string[]).includes(sp.tab ?? "") ? (sp.tab as Tab) : "overview";
   const client = await orNotFound(getClient(db, actor, id));

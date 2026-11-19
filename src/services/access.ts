@@ -2,7 +2,7 @@ import { and, eq, exists, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import type { Db } from "@/db";
 import { clientAssignments, clients, users } from "@/db/schema";
-import { isStaff, seesAllClients, type Actor } from "@/lib/auth/actor";
+import { ASSIGNABLE_ROLES, isStaff, seesAllClients, type Actor } from "@/lib/auth/actor";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { isUuid } from "@/lib/validation";
 import { can, type Action, type Module } from "@/lib/auth/permissions";
@@ -35,15 +35,20 @@ export function requireWriter(actor: Actor): void {
 /** Throws unless the actor holds this permission (see lib/auth/permissions.ts). */
 export function requirePermission(actor: Actor, module: Module, action: Action): void {
   requireStaff(actor);
+  // Firm billing (PayPal subscription and client QuickBooks billing) is Owner-only.
+  // Keep this rule centralized so future permission matrix edits cannot expose it.
+  if (module === "billing" && actor.role !== "admin") {
+    throw new ForbiddenError("Only the firm Owner can access billing.");
+  }
   if (!can(actor, module, action)) {
     throw new ForbiddenError(actor.role === "read_only" ? "Your account is read-only." : "You do not have permission to do that.");
   }
 }
 
-/** Employees may assign work to themselves; only admins and managers can delegate it. */
+/** Scoped staff may only assign work to themselves; managers may delegate. */
 export function requireCanAssign(actor: Actor, assigneeId: string): void {
   requireWriter(actor);
-  if (actor.role === "employee" && assigneeId !== actor.userId) {
+  if (["employee", "team_member", "sales_representative", "account_manager", "support_agent", "accountant", "developer"].some((role) => role === actor.role) && assigneeId !== actor.userId) {
     throw new ForbiddenError("Only an admin or manager can assign work to another staff member.");
   }
 }
@@ -94,6 +99,6 @@ export async function assertActiveStaffUser(db: Db, actor: Pick<Actor, "firmId">
     .where(and(eq(users.id, userId), inFirm(users.firmId, actor)))
     .limit(1);
   // Read-only users and clients can't own or be assigned work.
-  if (!user || !user.isActive || user.role === "client" || user.role === "read_only") throw invalid;
+  if (!user || !user.isActive || !ASSIGNABLE_ROLES.some((role) => role === user.role)) throw invalid;
   return { role: user.role };
 }

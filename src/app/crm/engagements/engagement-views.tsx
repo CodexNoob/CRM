@@ -66,7 +66,7 @@ function Progress({ done, total }: { done: number; total: number }) {
   );
 }
 
-export function EngagementListTable({ rows, today, canEdit, canApprove }: { rows: EngagementListRow[]; today: string; canEdit: boolean; canApprove: boolean }) {
+export function EngagementListTable({ rows, today, canEdit, canApprove, canViewBilling }: { rows: EngagementListRow[]; today: string; canEdit: boolean; canApprove: boolean; canViewBilling: boolean }) {
   const move = useStatusMove();
   return (
     <DataTable
@@ -114,7 +114,7 @@ export function EngagementListTable({ rows, today, canEdit, canApprove }: { rows
             );
           },
         },
-        { id: "fee", header: "Fee", align: "right", sort: (r) => r.feeCents ?? -1, hideBelow: "lg", cell: (r) => <span className="tabular">{r.feeCents !== null ? formatMoney(r.feeCents) : "—"}</span> },
+        ...(canViewBilling ? [{ id: "fee", header: "Fee", align: "right" as const, sort: (r: EngagementListRow) => r.feeCents ?? -1, hideBelow: "lg" as const, cell: (r: EngagementListRow) => <span className="tabular">{r.feeCents !== null ? formatMoney(r.feeCents) : "—"}</span> }] : []),
       ]}
       rowActions={(r) => [
         { label: "Open engagement", icon: <Briefcase />, href: `/crm/engagements/${r.id}` },
@@ -139,7 +139,7 @@ const COLUMNS: { key: string; label: string; statuses: EngagementStatus[] }[] = 
   { key: "done", label: "Completed", statuses: ["completed", "closed", "cancelled"] },
 ];
 
-export function EngagementBoard({ rows, today, canEdit, canApprove }: { rows: EngagementListRow[]; today: string; canEdit: boolean; canApprove: boolean }) {
+export function EngagementBoard({ rows, today, canEdit, canApprove, canViewBilling }: { rows: EngagementListRow[]; today: string; canEdit: boolean; canApprove: boolean; canViewBilling: boolean }) {
   const move = useStatusMove();
   const [pending, setPending] = useState<string | null>(null);
   return (

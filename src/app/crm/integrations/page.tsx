@@ -35,41 +35,42 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   const actor = await requireStaffActor();
   requirePermission(actor, "integrations", "view");
   const { qbo: qboResult } = await searchParams;
+  const isOwner = actor.role === "admin";
   const db = await databaseStatus();
   const qbo = readQboConfig();
-  const qboView = await getQboConnectionView(getDb(), { type: "firm", firmId: actor.firmId });
-  const paypal = paypalConfig();
+  const qboView = isOwner ? await getQboConnectionView(getDb(), { type: "firm", firmId: actor.firmId }) : null;
+  const paypal = isOwner ? paypalConfig() : null;
   const email = emailConfig();
   const sign = dropboxSignConfig();
 
   const rows: { name: string; icon: ReactNode; purpose: string; status: Status; detail: string }[] = [
     { name: "Database", icon: <Database />, purpose: "All CRM, portal and website data", ...db },
-    {
+    ...(isOwner && qboView ? [{
       name: "QuickBooks Online",
       icon: <Receipt />,
       purpose: "Firm invoices and client payments",
-      status: qboView.status === "connected" ? "connected" : qboView.status === "reauthorization_required" || qboView.status === "expired" ? "error" : "not_connected",
+      status: (qboView.status === "connected" ? "connected" : qboView.status === "reauthorization_required" || qboView.status === "expired" ? "error" : "not_connected") as Status,
       detail: qboView.companyName ?? (qbo.clientId && qbo.clientSecret ? "Intuit app configured; connect a company" : "Needs an Intuit developer app, token-encryption key, and company connection"),
-    },
-    {
+    }] : []),
+    ...(isOwner && paypal ? [{
       name: "PayPal",
       icon: <CreditCard />,
       purpose: "CRM subscription checkout and recurring fees",
-      status: paypal.isConfigured && paypal.isWebhookConfigured ? "connected" : "not_connected",
+      status: (paypal.isConfigured && paypal.isWebhookConfigured ? "connected" : "not_connected") as Status,
       detail: !paypal.isConfigured
         ? paypal.configurationMessage ?? "Configure the PayPal API credentials"
         : !paypal.isWebhookConfigured
           ? "API configured; add the PayPal webhook ID to enable checkout"
           : `Subscription billing · ${paypal.environment}`,
-    },
+    }] : []),
     {
       name: "Email delivery",
       icon: <Mail />,
       purpose: "Invitations, message alerts, inquiry notifications",
       status: email.isConfigured ? "connected" : "not_connected",
       detail: email.isConfigured
-        ? `${email.providerLabel} · website inquiry alerts${email.inquiryTo ? "" : " (no recipient set)"}; invitations are still shared manually`
-        : "No email service configured; links are shared manually",
+        ? `${email.providerLabel} · team invitation emails and website inquiry alerts${email.inquiryTo ? "" : " (no inquiry recipient set)"}; client portal invitations are shared manually`
+        : "No email service configured; team invitation emails cannot be sent",
     },
     { name: "Malware scanning", icon: <ShieldCheck />, purpose: "Scan every uploaded document", status: "not_connected", detail: "No scanner connected; files show “Not scanned”" },
     {
@@ -122,7 +123,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
           ))}
         </SimpleTable>
       </Panel>
-      <Panel title="Firm QuickBooks Online" description="This connection is only for this firm's accounting and client billing. Customer matching is explicit; the CRM never creates duplicate customers.">
+      {isOwner && qboView ? <Panel title="Firm QuickBooks Online" description="This connection is only for this firm's accounting and client billing. Customer matching is explicit; the CRM never creates duplicate customers.">
         <div className="space-y-5">
           <div>
             <h2 className="mb-2 text-[13px] font-semibold">This firm’s company</h2>
@@ -134,7 +135,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
             />
           </div>
         </div>
-      </Panel>
+      </Panel> : null}
     </>
   );
 }

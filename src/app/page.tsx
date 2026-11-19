@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import { CalendarClock, CircleDollarSign, FolderKanban, MonitorSmartphone, ShieldCheck, UsersRound } from "lucide-react";
 import { product, PLAN_INTERVALS } from "@/content/product";
 import { buttonClass } from "@/components/ui";
 import { CheckIcon, LockIcon } from "@/components/site/icons";
@@ -53,6 +54,8 @@ const faqs: [string, string][] = [
   ["How do payments work?", "CRM subscriptions are billed through PayPal. Card details never reach this app; QuickBooks is an optional integration for a firm’s own client billing."],
   ["Is our data kept separate from other firms?", "Yes. Every firm has its own private workspace; staff and clients only ever see their own firm’s records."],
 ];
+
+const featureIcons = [UsersRound, CalendarClock, MonitorSmartphone, CircleDollarSign, FolderKanban, ShieldCheck] as const;
 
 
 export default async function ProductHome() {
@@ -126,13 +129,16 @@ export default async function ProductHome() {
               <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">Run the whole practice from one place</h2>
             </div>
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-              {product.features.map((f) => (
+              {product.features.map((f, index) => {
+                const FeatureIcon = featureIcons[index]!;
+                return (
                 <article key={f.title} className="group rounded-2xl border border-slate-200/80 bg-linear-to-br from-white to-slate-50 p-6 shadow-sm transition duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-xl hover:shadow-blue-950/5">
-                  <span className="mb-5 flex size-10 items-center justify-center rounded-xl bg-blue-50 text-lg text-blue-800 transition group-hover:bg-blue-900 group-hover:text-white">✦</span>
+                  <span className="mb-5 flex size-10 items-center justify-center rounded-xl bg-blue-50 text-blue-800 transition group-hover:bg-blue-900 group-hover:text-white"><FeatureIcon className="size-5" aria-hidden /></span>
                   <h3 className="text-lg font-semibold text-slate-900">{f.title}</h3>
                   <p className="mt-1.5 text-sm leading-6 text-slate-600">{f.body}</p>
                 </article>
-              ))}
+                );
+              })}
             </div>
           </div>
         </section>

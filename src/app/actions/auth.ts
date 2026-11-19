@@ -54,16 +54,23 @@ export async function firstRunSetupAction(_prev: ActionState, formData: FormData
 }
 
 export async function acceptInvitationAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  let destination = "/login?setup=done";
   try {
+    const db = getDb();
     const password = formData.get("password");
     if (password !== formData.get("confirmPassword")) {
       throw new ValidationError({ confirmPassword: ["Passwords do not match."] });
     }
-    await acceptInvitation(getDb(), String(formData.get("token") ?? ""), password);
+    const accepted = await acceptInvitation(db, String(formData.get("token") ?? ""), password);
+    if (accepted.role === "client") {
+      const { token } = await createSession(db, accepted.userId);
+      await setSessionCookie(token);
+      destination = "/portal";
+    }
   } catch (error) {
     return errorState(error);
   }
-  redirect("/login?setup=done");
+  redirect(destination);
 }
 
 export async function requestPasswordResetAction(_prev: ActionState, formData: FormData): Promise<ActionState> {

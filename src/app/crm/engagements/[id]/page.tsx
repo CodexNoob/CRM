@@ -74,7 +74,7 @@ export default async function EngagementPage({ params, searchParams }: { params:
   const today = firmToday();
   const detail = await orNotFound(getEngagement(db, actor, id, today));
   const { engagement: e, tasks, progress, team } = detail;
-  const canBilling = can(actor, "billing", "view");
+  const canBilling = actor.role === "admin" && can(actor, "billing", "view");
   const tabs = TABS.filter((t) => t !== "billing" || canBilling);
   const tab: Tab = (tabs as readonly string[]).includes(sp.tab ?? "") ? (sp.tab as Tab) : "overview";
   const perms = {
@@ -176,7 +176,7 @@ export default async function EngagementPage({ params, searchParams }: { params:
               </span>,
             ],
             ["Tasks", `${progress.open} open · ${progress.completed} done${progress.overdue ? ` · ${progress.overdue} overdue` : ""}`],
-            ["Fee", e.feeCents !== null ? `${formatMoney(e.feeCents)}${e.billingFrequency ? ` · ${BILLING_FREQUENCY_LABELS[e.billingFrequency]}` : ""}` : "—"],
+            ...(actor.role === "admin" ? [["Fee", e.feeCents !== null ? `${formatMoney(e.feeCents)}${e.billingFrequency ? ` · ${BILLING_FREQUENCY_LABELS[e.billingFrequency]}` : ""}` : "—"] as const] : []),
           ].map(([k, v]) => (
             <div key={k as string} className="border-r border-line px-4 py-2.5 last:border-r-0">
               <dt className="text-[12px] text-muted">{k}</dt>
@@ -248,8 +248,7 @@ async function Overview({ ctx }: { ctx: Ctx }) {
               ["Accounting period", e.periodStart || e.periodEnd ? `${formatDate(e.periodStart)} – ${formatDate(e.periodEnd)}` : null],
               ["Start date", e.startDate ? formatDate(e.startDate) : null],
               ["Due date", e.dueDate ? formatDate(e.dueDate) : null],
-              ["Fee", e.feeCents !== null ? formatMoney(e.feeCents) : null],
-              ["Billing", e.billingFrequency ? BILLING_FREQUENCY_LABELS[e.billingFrequency] : null],
+              ...(actor.role === "admin" ? [["Fee", e.feeCents !== null ? formatMoney(e.feeCents) : null], ["Billing", e.billingFrequency ? BILLING_FREQUENCY_LABELS[e.billingFrequency] : null]] as [string, string | null][] : []),
               ["Completed", e.completedAt ? formatDate(e.completedAt.toISOString().slice(0, 10)) : null],
               ["Closed", e.closedAt ? formatDate(e.closedAt.toISOString().slice(0, 10)) : null],
             ]}

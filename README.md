@@ -224,9 +224,9 @@ Requests for records the actor may not see return **not found**, never "forbidde
 | **QuickBooks Online** | Optional per-firm OAuth connections, encrypted refresh-token rotation, explicit customer matching, client invoice creation/sending/voiding and payment-status sync are implemented. Keep firm financial actions disabled until the sandbox workflow is verified. See setup below. |
 | Malware scanning | **Interface only** (`src/lib/storage.ts`). Every file is marked "Not scanned" in the UI until a scanner (e.g. ClamAV or a cloud API) is connected. |
 | Object storage | Files are stored in the encrypted database (`document_blobs`) for the pilot. Moving to private Supabase Storage or S3 means swapping the `FileStorage` implementation. |
-| Email notifications | Website inquiry alerts and password resets use the configured Resend or Brevo provider; invitations are still shared manually. |
+| Email notifications | Website inquiry alerts, password resets, and staff invitation emails use the configured Resend or Brevo provider. Client portal invitation links are still shared manually. |
 | MFA | **Not built, and required before real client data is loaded.** Add TOTP/WebAuthn or move to a managed identity provider; auth is isolated in `src/lib/auth`. |
-| Password reset (self-service) | Staff can re-issue an invitation link instead. |
+| Password reset (self-service) | Staff can re-issue a password setup email to a team member instead. |
 | Rate limiting by IP | Per-account lockout only. Add edge or proxy rate limiting at deployment. |
 | Workflow templates, reminders, automation | Not built (requires a background job runner). |
 | Appointment booking | Not built. |

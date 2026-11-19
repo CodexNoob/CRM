@@ -109,12 +109,12 @@ export default async function StaffDashboard({ searchParams }: { searchParams: P
     getWorkspaceOverview(db, actor, { mine, now }),
     getWorkload(db, actor),
     listWorkspaceActivity(db, actor, 15),
-    invoiceTotals(db, actor, firmToday(now), now),
-    getQboConnectionView(db, { type: "firm", firmId: actor.firmId }, now),
+    actor.role === "admin" ? invoiceTotals(db, actor, firmToday(now), now) : Promise.resolve(null),
+    actor.role === "admin" ? getQboConnectionView(db, { type: "firm", firmId: actor.firmId }, now) : Promise.resolve(null),
   ]);
   const longDate = new Intl.DateTimeFormat("en-US", { timeZone: FIRM_TZ, weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(now);
   const k = o.kpis;
-  const scopeHint = mine ? "Yours" : actor.role === "employee" ? "Your clients" : "Across the firm";
+  const scopeHint = mine ? "Yours" : ["employee", "team_member", "sales_representative", "account_manager", "support_agent"].some((role) => role === actor.role) ? "Your clients" : "Across the firm";
 
   return (
     <div className="space-y-5">
@@ -128,7 +128,7 @@ export default async function StaffDashboard({ searchParams }: { searchParams: P
         <SegmentedLinks
           label="Scope"
           items={[
-            { href: "/crm", label: actor.role === "employee" ? "My clients" : "Whole firm", active: !mine },
+            { href: "/crm", label: ["employee", "team_member", "sales_representative", "account_manager", "support_agent"].some((role) => role === actor.role) ? "My clients" : "Whole firm", active: !mine },
             { href: "/crm?view=mine", label: "Mine", active: mine },
           ]}
         />
@@ -323,8 +323,8 @@ export default async function StaffDashboard({ searchParams }: { searchParams: P
             <Bars label="Tasks by status" rows={o.tasks.byStatus.map((s) => ({ key: s.status, name: s.status === "completed" ? "Completed (7 days)" : TASK_STATUS_LABELS[s.status], count: s.count, href: `/crm/tasks?scope=team&status=${s.status}` }))} />
           </Panel>
 
-          <Panel title="Billing" actions={<ButtonLink href="/crm/invoices" variant="ghost" size="sm">View invoices</ButtonLink>}>
-            {qbo.status === "connected" && qboFirmFinancialActionsEnabled() ? (
+          {actor.role === "admin" ? <Panel title="Billing" actions={<ButtonLink href="/crm/invoices" variant="ghost" size="sm">View invoices</ButtonLink>}>
+            {qbo?.status === "connected" && qboFirmFinancialActionsEnabled() && billing ? (
               <dl className="grid grid-cols-2 gap-3 text-[13px]">
                 {[
                   ["Outstanding", formatMoney(billing.outstandingCents), billing.outstandingCents ? "text-warning-ink" : "text-ink"],
@@ -343,7 +343,7 @@ export default async function StaffDashboard({ searchParams }: { searchParams: P
                 Verify the firm’s QuickBooks connection and sandbox invoice/payment workflow before enabling financial actions.
               </EmptyState>
             )}
-          </Panel>
+          </Panel> : null}
         </div>
       </div>
     </div>
