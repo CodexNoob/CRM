@@ -6,7 +6,7 @@ import type { Actor } from "@/lib/auth/actor";
 import { can } from "@/lib/auth/permissions";
 import { AppError, NotFoundError, ValidationError } from "@/lib/errors";
 import { LEAD_OPEN } from "@/lib/status";
-import { activityInputSchema, isUuid, leadConversionSchema, leadInputSchema, leadStatusChangeSchema, leadUpdateSchema, parseInput, websiteInquirySchema } from "@/lib/validation";
+import { activityInputSchema, isUuid, leadConversionSchema, leadFollowUpSchema, leadInputSchema, leadStatusChangeSchema, leadUpdateSchema, parseInput, websiteInquirySchema } from "@/lib/validation";
 import { assertActiveStaffUser, assertClientAccess, inFirm, requirePermission, requireStaff } from "./access";
 import { recordAudit } from "./audit";
 import { createClient, findPossibleDuplicates, type DuplicateCandidate } from "./clients";
@@ -217,6 +217,38 @@ export async function setLeadStatus(db: Db, actor: Actor, id: string, input: unk
       .where(and(eq(leads.id, id), inFirm(leads.firmId, actor)));
     await recordStatusChange(tx, actor, { entityType: "lead", entityId: id, from: lead.status, to: d.status, note: d.status === "lost" ? d.lostReason : d.note });
     await recordAudit(tx, { firmId: actor.firmId, actorUserId: actor.userId, action: "lead.update", entityType: "lead", entityId: id, metadata: { changedFields: ["status"] } });
+  });
+}
+
+/** Schedules or clears a lead follow-up directly, without resubmitting the full lead form. */
+export async function setLeadFollowUpDate(db: Db, actor: Actor, id: string, input: unknown): Promise<void> {
+  requirePermission(actor, "leads", "edit");
+  const { followUpDate } = parseInput(leadFollowUpSchema, input);
+  const lead = await getLead(db, actor, id);
+  if (lead.status === "converted") throw new ValidationError({ _form: ["This lead was converted to a client. Schedule follow-up from the client record instead."] });
+  const nextDate = followUpDate ?? null;
+  if ((lead.followUpDate ?? null) === nextDate) return;
+
+  await db.transaction(async (txRaw) => {
+    const tx = txRaw as unknown as Db;
+    await tx.update(leads)
+      .set({ followUpDate: nextDate, updatedAt: new Date() })
+      .where(and(eq(leads.id, id), inFirm(leads.firmId, actor)));
+    await recordAudit(tx, {
+      firmId: actor.firmId,
+      actorUserId: actor.userId,
+      action: nextDate ? "lead.follow_up_scheduled" : "lead.follow_up_cleared",
+      entityType: "lead",
+      entityId: id,
+      metadata: { changedFields: ["followUpDate"] },
+    });
+    await logActivity(tx, actor, {
+      entityType: "lead",
+      entityId: id,
+      type: "system",
+      body: nextDate ? "Follow-up scheduled" : "Follow-up cleared",
+      ...(nextDate ? { metadata: { followUpDate: nextDate } } : {}),
+    });
   });
 }
 

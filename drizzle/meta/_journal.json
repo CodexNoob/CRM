@@ -204,6 +204,13 @@
       "when": 1795020000000,
       "tag": "0028_gohighlevel_lead_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1795030000000,
+      "tag": "0029_lead_follow_up_automation",
+      "breakpoints": true
     }
   ]
 }

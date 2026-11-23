@@ -91,6 +91,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
   const details: [string, React.ReactNode][] = [
     ["Client", d.clientName && t.clientId ? <Link key="c" href={`/crm/clients/${t.clientId}`} className="text-brand-ink hover:underline">{d.clientName}</Link> : "—"],
     ["Engagement", d.engagementTitle && t.engagementId ? <Link key="e" href={`/crm/engagements/${t.engagementId}`} className="text-brand-ink hover:underline">{d.engagementTitle}</Link> : "—"],
+    ["Lead", d.leadName && t.leadId ? <Link key="l" href={`/crm/leads/${t.leadId}`} className="text-brand-ink hover:underline">{d.leadName}</Link> : "—"],
     [
       "Assigned to",
       <span key="a" className="flex flex-wrap items-center gap-2">

@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, ilike, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@/db";
-import { clients, documents, engagements, taskChecklistItems, taskDependencies, tasks, users, type Task, type TaskStatus } from "@/db/schema";
+import { clients, documents, engagements, leads, taskChecklistItems, taskDependencies, tasks, users, type Task, type TaskStatus } from "@/db/schema";
 import { isManagerOrAdmin, seesAllClients, type Actor } from "@/lib/auth/actor";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { TASK_CLOSED, TASK_OPEN } from "@/lib/status";
@@ -156,6 +156,7 @@ export interface TaskDetail {
   task: Task;
   clientName: string | null;
   engagementTitle: string | null;
+  leadName: string | null;
   assigneeName: string | null;
   assignedByName: string | null;
   parent: { id: string; title: string } | null;
@@ -172,10 +173,11 @@ export async function getTask(db: Db, actor: Actor, taskId: string): Promise<Tas
   requireStaff(actor);
   const task = await loadTask(db, actor, taskId);
   const [names] = await db
-    .select({ clientName: clients.displayName, engagementTitle: engagements.title, assigneeName: assignee.name, assignedByName: assigner.name })
+    .select({ clientName: clients.displayName, engagementTitle: engagements.title, leadName: leads.name, assigneeName: assignee.name, assignedByName: assigner.name })
     .from(tasks)
     .leftJoin(clients, and(eq(clients.id, tasks.clientId), eq(clients.firmId, tasks.firmId)))
     .leftJoin(engagements, and(eq(engagements.id, tasks.engagementId), eq(engagements.firmId, tasks.firmId)))
+    .leftJoin(leads, and(eq(leads.id, tasks.leadId), eq(leads.firmId, tasks.firmId)))
     .leftJoin(assignee, eq(assignee.id, tasks.assigneeId))
     .leftJoin(assigner, eq(assigner.id, tasks.assignedById))
     .where(and(eq(tasks.id, task.id), inFirm(tasks.firmId, actor)));
@@ -193,6 +195,7 @@ export async function getTask(db: Db, actor: Actor, taskId: string): Promise<Tas
     task,
     clientName: names?.clientName ?? null,
     engagementTitle: names?.engagementTitle ?? null,
+    leadName: names?.leadName ?? null,
     assigneeName: names?.assigneeName ?? null,
     assignedByName: names?.assignedByName ?? null,
     parent,

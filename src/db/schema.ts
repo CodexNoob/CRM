@@ -145,6 +145,8 @@ export const firms = pgTable(
     trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
     /* The firm's subscription to this software, billed by the platform operator. */
     billingInterval: text("billing_interval"), // "month" | "year"
+    /** Cursor used to distribute new GoHighLevel leads among active staff. */
+    leadAssignmentCursor: integer("lead_assignment_cursor").notNull().default(0),
     paypalSubscriptionId: text("paypal_subscription_id"),
     paypalCheckoutRequestId: text("paypal_checkout_request_id"),
     legacyExternalSubscriptionId: text("legacy_external_subscription_id"),
@@ -430,6 +432,8 @@ export const tasks = pgTable(
     engagementId: uuid("engagement_id").references(() => engagements.id, { onDelete: "cascade" }),
     /** Always set when the task relates to a client (derived from the engagement when there is one). */
     clientId: uuid("client_id").references(() => clients.id, { onDelete: "restrict" }),
+    /** Optional link for prospect follow-up tasks. */
+    leadId: uuid("lead_id"),
     /** Per-firm sequence shown as T-0001. */
     taskNumber: integer("task_number"),
     title: text("title").notNull(),
@@ -457,12 +461,14 @@ export const tasks = pgTable(
   (t) => [
     index("tasks_engagement_idx").on(t.engagementId),
     index("tasks_client_idx").on(t.clientId),
+    index("tasks_lead_idx").on(t.leadId),
     index("tasks_assignee_status_idx").on(t.assigneeId, t.status),
     index("tasks_firm_idx").on(t.firmId),
     uniqueIndex("tasks_firm_number_unique").on(t.firmId, t.taskNumber),
     unique("tasks_firm_id_id_unique").on(t.firmId, t.id),
     foreignKey({ name: "tasks_firm_engagement_fk", columns: [t.firmId, t.engagementId], foreignColumns: [engagements.firmId, engagements.id] }),
     foreignKey({ name: "tasks_firm_client_fk", columns: [t.firmId, t.clientId], foreignColumns: [clients.firmId, clients.id] }),
+    foreignKey({ name: "tasks_firm_lead_fk", columns: [t.firmId, t.leadId], foreignColumns: [leads.firmId, leads.id] }),
     foreignKey({ name: "tasks_firm_assignee_fk", columns: [t.firmId, t.assigneeId], foreignColumns: [users.firmId, users.id] }),
     foreignKey({ name: "tasks_firm_parent_fk", columns: [t.firmId, t.parentTaskId], foreignColumns: [t.firmId, t.id] }),
   ],
@@ -535,6 +541,7 @@ export const leads = pgTable(
   (t) => [
     index("leads_status_idx").on(t.status),
     uniqueIndex("leads_firm_number_unique").on(t.firmId, t.leadNumber),
+    unique("leads_firm_id_id_unique").on(t.firmId, t.id),
     index("leads_follow_up_idx").on(t.firmId, t.followUpDate),
     index("leads_owner_idx").on(t.ownerId),
     index("leads_firm_idx").on(t.firmId),

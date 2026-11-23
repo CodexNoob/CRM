@@ -16,7 +16,7 @@ import { firmToday } from "@/services/dashboard";
 import { listStaff } from "@/services/engagements";
 import { findLeadDuplicates, getLead } from "@/services/leads";
 import { listEntityTimeline, listStatusHistory, type TimelineItem } from "@/services/timeline";
-import { ArchiveLeadButton, ConvertLeadButton, EditLeadButton, LogActivityForm, StageControl, type LeadView } from "../lead-forms";
+import { ArchiveLeadButton, ConvertLeadButton, EditLeadButton, LeadFollowUpForm, LogActivityForm, StageControl, type LeadView } from "../lead-forms";
 
 export const metadata: Metadata = { title: "Lead" };
 
@@ -249,7 +249,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
                 ["Assigned to", lead.ownerName ?? "Unassigned"],
               ]}
             />
-            {canEdit ? <p className="mt-3 text-[12px] text-muted">Schedule the next follow-up when you log an activity, or in Edit.</p> : null}
+            {canEdit ? <LeadFollowUpForm id={lead.id} followUpDate={lead.followUpDate} /> : null}
           </Panel>
 
           <Panel title="Stage history" flush>

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useActionState, useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, ArchiveRestore, Pencil, Plus, UserCheck } from "lucide-react";
-import { addLeadActivityAction, archiveLeadAction, convertLeadAction, createLeadAction, moveLeadAction, setLeadStatusAction, updateLeadAction } from "@/app/actions/crm";
+import { addLeadActivityAction, archiveLeadAction, convertLeadAction, createLeadAction, moveLeadAction, setLeadFollowUpAction, setLeadStatusAction, updateLeadAction } from "@/app/actions/crm";
 import type { ClientType, LeadSource, LeadStatus, Priority, ServiceType } from "@/db/schema";
 import { Dialog } from "@/components/dialog";
 import { FormMessage, inputClass, SelectField, SubmitButton, TextField, textareaClass } from "@/components/form";
@@ -316,6 +316,45 @@ export function StageControl({ id, status }: { id: string; status: LeadStatus })
         Update stage
       </SubmitButton>
       <p className="text-[12px] text-muted">To mark it Won, use “Convert to client”.</p>
+    </form>
+  );
+}
+
+/** Direct follow-up scheduling from the lead detail page. */
+export function LeadFollowUpForm({ id, followUpDate }: { id: string; followUpDate: string | null }) {
+  const [date, setDate] = useState(followUpDate ?? "");
+  const [state, action] = useActionState(setLeadFollowUpAction.bind(null, id), idleState);
+  const toast = useToast();
+  const router = useRouter();
+  useEffect(() => {
+    if (state.status === "success") {
+      toast.fromState(state);
+      setDate(state.data?.followUpDate ?? "");
+      router.refresh();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
+  return (
+    <form action={action} className="mt-3 space-y-2.5" noValidate>
+      <FormError state={state} />
+      <div className="space-y-1.5">
+        <label htmlFor="lead-follow-up-date" className="block text-[12.5px] font-medium text-ink">Set next follow-up</label>
+        <input
+          id="lead-follow-up-date"
+          name="followUpDate"
+          type="date"
+          value={date}
+          onChange={(event) => setDate(event.target.value)}
+          aria-invalid={state.fieldErrors?.followUpDate ? true : undefined}
+          className={inputClass}
+        />
+        {state.fieldErrors?.followUpDate ? <p className="text-[12px] text-danger-ink">{state.fieldErrors.followUpDate.join(" ")}</p> : null}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <SubmitButton size="sm" variant="secondary">Save follow-up</SubmitButton>
+        {date ? <button type="submit" name="clearFollowUp" value="true" className={buttonClass("ghost", undefined, "sm")}>Clear date</button> : null}
+      </div>
     </form>
   );
 }

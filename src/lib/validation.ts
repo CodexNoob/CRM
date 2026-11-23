@@ -234,6 +234,8 @@ export const leadStatusChangeSchema = z
   })
   .refine((d) => d.status !== "lost" || !!d.lostReason, { path: ["lostReason"], message: "Say why the lead was lost." });
 
+export const leadFollowUpSchema = z.object({ followUpDate: isoDate });
+
 /** Notes, calls, emails and meetings on a lead/client/engagement/task timeline. */
 export const activityInputSchema = z.object({
   type: z.enum(["note", "call", "email", "meeting", "comment", "internal_note"], { error: "Choose an activity type." }),

@@ -13,7 +13,7 @@ import {
   setOnboardingItemStatus,
   updateClient,
 } from "@/services/clients";
-import { addLeadActivity, AlreadyConvertedError, convertLead, createLead, setLeadArchived, setLeadStatus, updateLead } from "@/services/leads";
+import { addLeadActivity, AlreadyConvertedError, convertLead, createLead, setLeadArchived, setLeadFollowUpDate, setLeadStatus, updateLead } from "@/services/leads";
 
 /** formValues() plus multi-value fields (checkbox groups) as arrays. */
 function formInput(formData: FormData, multi: string[] = []): Record<string, unknown> {
@@ -62,6 +62,22 @@ export async function setLeadStatusAction(id: string, _prev: ActionState, formDa
   }
   refreshLeads();
   return { status: "success", message: "Stage updated." };
+}
+
+export async function setLeadFollowUpAction(id: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  const actor = await requireStaffActor();
+  const followUpDate = formData.get("clearFollowUp") === "true" ? "" : formData.get("followUpDate");
+  try {
+    await setLeadFollowUpDate(getDb(), actor, id, { followUpDate });
+  } catch (error) {
+    return errorState(error, formData);
+  }
+  refreshLeads();
+  return {
+    status: "success",
+    message: followUpDate ? "Follow-up scheduled." : "Follow-up cleared.",
+    data: { followUpDate: typeof followUpDate === "string" ? followUpDate : "" },
+  };
 }
 
 /** Kanban / row-menu stage moves (no reason needed, except Lost which the UI asks for). */

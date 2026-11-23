@@ -35,17 +35,20 @@ export async function getNotifications(db: Db, actor: Actor): Promise<Notificati
     db
       .select({ n })
       .from(tasks)
-      .innerJoin(engagements, eq(engagements.id, tasks.engagementId))
-      .innerJoin(clients, eq(clients.id, engagements.clientId))
+      .leftJoin(engagements, and(eq(engagements.id, tasks.engagementId), eq(engagements.firmId, tasks.firmId)))
+      .leftJoin(clients, and(sql`${clients.id} = coalesce(${tasks.clientId}, ${engagements.clientId})`, eq(clients.firmId, tasks.firmId)))
       .where(
         and(
           inFirm(tasks.firmId, actor),
-          inFirm(engagements.firmId, actor),
-          visible,
           eq(tasks.assigneeId, actor.userId),
           inArray(tasks.status, TASK_OPEN),
           isNotNull(tasks.dueDate),
           sql`${tasks.dueDate} <= ${today}`,
+          or(
+            and(isNotNull(tasks.leadId), isNull(tasks.clientId)),
+            and(isNotNull(engagements.id), inFirm(engagements.firmId, actor), visible),
+            and(isNotNull(tasks.clientId), visible),
+          ),
         ),
       ),
   ]);
@@ -86,8 +89,8 @@ async function personalNotifications(db: Db, actor: Actor): Promise<Notification
     .orderBy(desc(activities.occurredAt))
     .limit(8);
   return rows.map((r) => {
-    const title = typeof r.metadata?.title === "string" ? r.metadata.title : r.entityType === "task" ? "a task" : "an engagement";
-    const href = r.entityType === "task" ? `/crm/tasks/${r.entityId}` : `/crm/engagements/${r.entityId}`;
+    const title = typeof r.metadata?.title === "string" ? r.metadata.title : r.entityType === "task" ? "a task" : r.entityType === "lead" ? "a lead" : "an engagement";
+    const href = r.entityType === "task" ? `/crm/tasks/${r.entityId}` : r.entityType === "lead" ? `/crm/leads/${r.entityId}` : `/crm/engagements/${r.entityId}`;
     const kind = typeof r.metadata?.kind === "string" ? r.metadata.kind : null;
     if (kind === "message") {
       const conv = typeof r.metadata?.conversationId === "string" ? r.metadata.conversationId : r.entityType === "conversation" ? r.entityId : null;
@@ -97,7 +100,7 @@ async function personalNotifications(db: Db, actor: Actor): Promise<Notification
       return { id: `profile-${r.id}`, label: "Client asked to update contact details", detail: "Review and update the client record", count: 1, href: r.entityType === "client" ? `/crm/clients/${r.entityId}?tab=activity` : "/crm/clients", tone: "warn" as const };
     }
     if (r.type === "assignment") {
-      return { id: `assign-${r.id}`, label: `You were assigned to ${title}`, detail: r.actorName ? `By ${r.actorName}` : r.entityType === "task" ? "Task" : "Engagement team", count: 1, href, tone: "info" as const };
+      return { id: `assign-${r.id}`, label: `You were assigned to ${title}`, detail: r.actorName ? `By ${r.actorName}` : r.entityType === "task" ? "Follow-up task" : r.entityType === "lead" ? "Lead owner" : "Engagement team", count: 1, href, tone: "info" as const };
     }
     return { id: `review-${r.id}`, label: `${title} is ready for review`, detail: "All tasks are completed", count: 1, href, tone: "warn" as const };
   });
