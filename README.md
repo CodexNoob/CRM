@@ -102,6 +102,8 @@ The seed script refuses to write demo data into PostgreSQL unless you pass `--al
 | `PAYPAL_ENVIRONMENT` | CRM subscriptions | `sandbox` for development; explicitly set to `live` in production |
 | `PAYPAL_CURRENCY` | CRM subscriptions | Three-letter plan currency (default `USD`) |
 | `PAYPAL_WEBHOOK_ID` | CRM subscriptions | ID of the registered PayPal webhook used for signature verification |
+| `GOHIGHLEVEL_FIRM_ID` | GoHighLevel lead sync | CRM firm UUID that owns incoming GoHighLevel leads |
+| `GOHIGHLEVEL_WEBHOOK_SECRET` | GoHighLevel lead sync | Shared bearer secret (at least 32 characters); server-side only |
 | `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET` | billing | Intuit app credentials; server-side secrets only |
 | `QBO_REDIRECT_URI` | billing | Must exactly equal `${APP_URL}/api/integrations/qbo/callback` |
 | `QBO_ENVIRONMENT` | billing | `sandbox` for development; `production` only after verification |
@@ -221,6 +223,7 @@ Requests for records the actor may not see return **not found**, never "forbidde
 | Area | Status |
 | --- | --- |
 | **PayPal** | CRM plan subscriptions, approval checkout, cancellation, renewal/status synchronization and signature-verified webhooks are implemented. Sandbox is the development default; production requires explicit live configuration. See setup below. |
+| **GoHighLevel** | Initial inbound lead webhook is implemented. It matches repeat contacts by GoHighLevel contact ID, then email/phone; CRM owns stage, assignment, notes, consent and conversion. Configure and test before enabling workflow triggers. See setup below. |
 | **QuickBooks Online** | Optional per-firm OAuth connections, encrypted refresh-token rotation, explicit customer matching, client invoice creation/sending/voiding and payment-status sync are implemented. Keep firm financial actions disabled until the sandbox workflow is verified. See setup below. |
 | Malware scanning | **Interface only** (`src/lib/storage.ts`). Every file is marked "Not scanned" in the UI until a scanner (e.g. ClamAV or a cloud API) is connected. |
 | Object storage | Files are stored in the encrypted database (`document_blobs`) for the pilot. Moving to private Supabase Storage or S3 means swapping the `FileStorage` implementation. |
@@ -234,6 +237,17 @@ Requests for records the actor may not see return **not found**, never "forbidde
 | Online self-scheduling by clients | Not built. Staff book appointments; clients see them in the portal. |
 | Staff user management UI, audit log viewer | CLI and service layer only. |
 | Data retention, backups, deployment configuration | Not built. |
+
+## GoHighLevel inbound lead sync
+
+This first integration slice accepts GoHighLevel contact webhook payloads at `POST /api/webhooks/gohighlevel`. It creates a CRM lead or updates a matching lead. Matching uses the GoHighLevel contact ID first, then normalized email or phone. It never creates a client or changes lead stage, owner, internal notes, or consent. Tags from a new contact are preserved in the lead's initial message field. The configured firm UUID is resolved server-side, and the request must include `Authorization: Bearer <GOHIGHLEVEL_WEBHOOK_SECRET>`.
+
+1. Apply the pending migration to the same database used by the app: `npm run db:migrate`.
+2. Set `GOHIGHLEVEL_FIRM_ID` to the intended CRM firm UUID and `GOHIGHLEVEL_WEBHOOK_SECRET` to a random secret with at least 32 characters in the app's server environment.
+3. In GoHighLevel, create a workflow triggered by a contact create/update event and send a JSON POST to `https://<your-app-origin>/api/webhooks/gohighlevel`. Include the bearer authorization header. Send `contact.id`, `contact.firstName`, `contact.lastName`, `contact.email`, `contact.phone`, `contact.companyName`, and `contact.tags` (the route also accepts a flat contact object and common snake_case variants).
+4. Start with a test contact and confirm the CRM returns `{ "received": true, "id": "…", "action": "created" }`; replay the same event and confirm it returns `action: "updated"` with the same ID. Verify the CRM lead list and audit timeline before enabling the workflow for all contacts.
+
+Pipeline-stage mapping and CRM-to-GoHighLevel opportunity updates are later steps. Configure those after agreeing which GoHighLevel pipeline/stages map to CRM statuses and which system owns each mapped field.
 
 ## PayPal CRM subscriptions: setup and deployment
 

@@ -517,6 +517,8 @@ export const leads = pgTable(
     consentAt: timestamp("consent_at", { withTimezone: true }),
     /** Per-firm sequence shown as L-0001. */
     leadNumber: integer("lead_number"),
+    /** GoHighLevel contact reference used for inbound webhook deduplication. */
+    goHighLevelContactId: text("gohighlevel_contact_id"),
     clientType: clientType("client_type"),
     address: text("address"),
     /** All services the prospect asked about (service_interest holds the first, for older screens). */
@@ -536,6 +538,7 @@ export const leads = pgTable(
     index("leads_follow_up_idx").on(t.firmId, t.followUpDate),
     index("leads_owner_idx").on(t.ownerId),
     index("leads_firm_idx").on(t.firmId),
+    uniqueIndex("leads_firm_gohighlevel_contact_unique").on(t.firmId, t.goHighLevelContactId),
     foreignKey({ name: "leads_firm_owner_fk", columns: [t.firmId, t.ownerId], foreignColumns: [users.firmId, users.id] }),
     foreignKey({ name: "leads_firm_client_fk", columns: [t.firmId, t.convertedClientId], foreignColumns: [clients.firmId, clients.id] }),
   ],
