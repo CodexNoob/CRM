@@ -278,7 +278,11 @@ export async function syncFirmBilling(
     const snapshot = await provider.getSubscription(firm.paypalSubscriptionId);
     return await syncFromSnapshot(db, firm, snapshot, now);
   } catch (error) {
-    console.error("Firm PayPal billing refresh failed", { firmId, error: error instanceof Error ? error.name : "UnknownError" });
+    console.error("Firm PayPal billing refresh failed", {
+      firmId,
+      error: error instanceof Error ? error.name : "UnknownError",
+      ...(error instanceof paypal.PayPalError ? { status: error.status, issue: error.issue } : {}),
+    });
     return firm;
   }
 }
